@@ -57,7 +57,7 @@ target_include_directories(
     "$<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/export>"
 )
 
-target_compile_features(mscan_mscan PUBLIC cxx_std_20)
+target_compile_features(mscan_mscan PUBLIC cxx_std_23)
 
 # ---- Install rules ----
 

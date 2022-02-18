@@ -1,6 +1,7 @@
 .idea/
 .vs/
 .vscode/
+.history/
 build/
 cmake/open-cpp-coverage.cmake
 cmake-build-*/
