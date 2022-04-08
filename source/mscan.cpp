@@ -34,6 +34,49 @@ static_assert((*extract_date("2018/08/27"sv)).year == "2018"sv);
 static_assert((*extract_date("2018/08/27"sv)).month == "08"sv);
 static_assert((*extract_date("2018/08/27"sv)).day == "27"sv);
 
+struct image
+{
+};
+
+struct fail_reason
+{
+  std::string_view reason;
+};
+
+tl::expected<image, fail_reason> crop_to_cat(const image& img)
+{
+  return img;
+}
+
+tl::expected<image, fail_reason> add_bow_tie(const image& img)
+{
+  return img;
+}
+
+tl::expected<image, fail_reason> make_eyes_sparkle(const image& img)
+{
+  return img;
+}
+
+image make_smaller(const image& img)
+{
+  return img;
+}
+
+image add_rainbow(const image& img)
+{
+  return img;
+}
+
+tl::expected<image, fail_reason> get_cute_cat(const image& img)
+{
+  return crop_to_cat(img)
+      .and_then(add_bow_tie)
+      .and_then(make_eyes_sparkle)
+      .map(make_smaller)
+      .map(add_rainbow);
+}
+
 exported_class::exported_class()
     : m_name("mscan")
 {
