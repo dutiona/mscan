@@ -59,6 +59,36 @@ target_include_directories(
 
 target_compile_features(mscan_mscan PUBLIC cxx_std_23)
 
+# -- External dependencies
+
+include(FetchContent)
+
+FetchContent_Declare(
+    expected
+    GIT_REPOSITORY https://github.com/TartanLlama/expected
+    GIT_TAG "v1.0.0"
+)
+
+FetchContent_Declare(
+    ctre
+    GIT_REPOSITORY https://github.com/hanickadot/compile-time-regular-expressions
+    GIT_TAG "v3.6"
+)
+
+FetchContent_MakeAvailable(expected ctre)
+
+target_link_libraries(
+  mscan_mscan
+  PRIVATE
+  expected ctre
+)
+
+#target_link_libraries(
+#  mscan_mscan
+#  INTERFACE
+#  expected ctre
+#)
+
 # ---- Install rules ----
 
 if(NOT CMAKE_SKIP_INSTALL_RULES)

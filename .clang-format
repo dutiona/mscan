@@ -72,9 +72,8 @@ ForEachMacros:
   - BOOST_FOREACH
 IncludeBlocks: Regroup
 IncludeCategories:
-  # Standard library headers come before anything else
   - Regex: '^<[a-z_]+>'
-    Priority: -1
+    Priority: 9
   - Regex: '^<.+\.h(pp)?>'
     Priority: 1
   - Regex: '^<.*'
