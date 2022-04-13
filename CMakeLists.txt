@@ -77,17 +77,17 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(expected ctre)
 
-target_link_libraries(
-  mscan_mscan
-  PRIVATE
-  expected ctre
-)
-
 #target_link_libraries(
 #  mscan_mscan
-#  INTERFACE
+#  PRIVATE
 #  expected ctre
 #)
+
+target_link_libraries(
+  mscan_mscan
+  PUBLIC
+  expected ctre
+)
 
 # ---- Install rules ----
 

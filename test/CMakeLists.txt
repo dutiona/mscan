@@ -11,7 +11,17 @@ if(PROJECT_IS_TOP_LEVEL)
 endif()
 
 add_executable(mscan_test source/mscan_test.cpp)
-target_link_libraries(mscan_test PRIVATE mscan::mscan)
+
+FetchContent_Declare(
+    Catch2
+    GIT_REPOSITORY https://github.com/catchorg/Catch2.git
+    GIT_TAG "v3.0.0-preview3"
+)
+
+FetchContent_MakeAvailable(Catch2)
+
+target_link_libraries(mscan_test PRIVATE mscan::mscan Catch2::Catch2WithMain)
+
 target_compile_features(mscan_test PRIVATE cxx_std_20)
 
 add_test(NAME mscan_test COMMAND mscan_test)
