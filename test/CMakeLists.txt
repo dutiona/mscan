@@ -12,6 +12,8 @@ endif()
 
 add_executable(mscan_test source/mscan_test.cpp)
 
+include(FetchContent)
+
 FetchContent_Declare(
     Catch2
     GIT_REPOSITORY https://github.com/catchorg/Catch2.git
