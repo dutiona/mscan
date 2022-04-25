@@ -5,6 +5,7 @@
 #include "mscan/mscan.hpp"
 
 #include <algorithm>
+#include <cassert>
 #include <charconv>
 #include <concepts>
 #include <iostream>
@@ -236,6 +237,34 @@ using expected_string_t = tl::expected<std::string, invalid_string>;
 template<typename T>
 inline constexpr bool always_false_v = false;
 
+template<class To>
+requires std::is_same_v < std::remove_cvref_t<To>,
+int > auto cast_to(std::string_view sv)
+{
+  return cast_to_int(sv);
+}
+
+template<class To>
+requires std::is_same_v < std::remove_cvref_t<To>,
+float > auto cast_to(std::string_view sv)
+{
+  return cast_to_float(sv);
+}
+
+template<class To>
+requires std::is_same_v < std::remove_cvref_t<To>,
+double > auto cast_to(std::string_view sv)
+{
+  return cast_to_double(sv);
+}
+
+template<class To>
+requires std::is_same_v<std::remove_cvref_t<To>, std::string>
+auto cast_to(std::string_view sv)
+{
+  return std::string {begin(sv), end(sv)};
+}
+
 template<class T>
 struct select_expected
 {
@@ -273,11 +302,40 @@ template<class T>
 using select_expected_t = typename select_expected<T>::type;
 
 template<class... ExpectedTypes>
-auto match_pattern(std::string_view pattern, std::string_view input)
+using expected_output_t = std::tuple<select_expected_t<ExpectedTypes>...>;
+
+template<class... ExpectedTypes, typename F, size_t... Is>
+auto gen_tuple_impl(F func, std::index_sequence<Is...>)
+{
+  using tuple_t = std::tuple<ExpectedTypes...>;
+  return std::make_tuple(
+      cast_to<decltype(std::get<Is>(std::declval<tuple_t>()))>(func(Is))...);
+}
+
+template<size_t N, class... ExpectedTypes, typename F>
+auto gen_tuple(F func)
+{
+  return gen_tuple_impl<ExpectedTypes...>(func, std::make_index_sequence<N> {});
+}
+
+template<class... ExpectedTypes>
+expected_output_t<ExpectedTypes...> assemble_resulting_tuple(
+    const parse_result_t& parse_result)
 {
   constexpr std::size_t nb_matches = sizeof...(ExpectedTypes);
-  using output_t = std::tuple<select_expected_t<ExpectedTypes>...>;
 
+  assert(nb_matches == parse_result.size()
+         && "Error! Size of result tuple and parsed result does not match!");
+
+  auto expected_output = gen_tuple<nb_matches, ExpectedTypes...>(
+      [&parse_result](std::size_t idx) { return parse_result[idx].second; });
+
+  return expected_output;
+}
+
+template<class... ExpectedTypes>
+auto match_pattern(std::string_view pattern, std::string_view input)
+{
   using std::ranges::begin;
   using std::ranges::end;
 
@@ -287,12 +345,19 @@ auto match_pattern(std::string_view pattern, std::string_view input)
   auto parse_result = parse_input_from_pattern(pattern, input);
   if (parse_result) {
     auto res = *parse_result;
+
     std::cout << fmt::format("Result size <{}>\n"sv, res.size());
 
     // Print result
     for (auto&& [p, m] : res) {
       std::cout << fmt::format("<{}> : <{}>\n"sv, p, m);
     }
+
+    auto ret = assemble_resulting_tuple<ExpectedTypes...>(res);
+
+    std::cout << fmt::format("Expected idx=0 {}\n", *std::get<0>(ret));
+    std::cout << fmt::format("Expected idx=1 {}\n", *std::get<1>(ret));
+    std::cout << fmt::format("Expected idx=2 {}\n", *std::get<2>(ret));
   } else {
     auto err = parse_result.error();
     std::cerr << fmt::format("Unexpected error: {}", err.what()) << std::endl;
