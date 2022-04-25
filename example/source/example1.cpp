@@ -308,6 +308,8 @@ template<class... ExpectedTypes, typename F, size_t... Is>
 auto gen_tuple_impl(F func, std::index_sequence<Is...>)
 {
   using tuple_t = std::tuple<ExpectedTypes...>;
+  // FIXME cast_to should receive a pair of arg, one is info about prec, 2nd is
+  // actual parsed value
   return std::make_tuple(
       cast_to<decltype(std::get<Is>(std::declval<tuple_t>()))>(func(Is))...);
 }
@@ -328,7 +330,11 @@ expected_output_t<ExpectedTypes...> assemble_resulting_tuple(
          && "Error! Size of result tuple and parsed result does not match!");
 
   auto expected_output = gen_tuple<nb_matches, ExpectedTypes...>(
-      [&parse_result](std::size_t idx) { return parse_result[idx].second; });
+      [&parse_result](std::size_t idx)
+      {
+        // FIXME fwd also first arg containing precision info
+        return parse_result[idx].second;  // keep only value of pattern
+      });
 
   return expected_output;
 }
