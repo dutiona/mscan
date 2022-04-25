@@ -143,6 +143,135 @@ struct select_expected<std::string>
 template<class T>
 using select_expected_t = typename select_expected<T>::type;
 
+using parse_result_t =
+    std::vector<std::pair<std::string_view, std::string_view>>;
+
+struct parse_error
+{
+  enum class error_type
+  {
+    nestedBrace,
+    unexpectedClosingBrace,
+    openingBraceJuxtaposedToClosingBrace,
+    missmatchPatternAndInput
+  };
+
+  const std::string& what() const
+  {
+    return msg_;
+  }
+
+  auto type() const
+  {
+    return t_;
+  }
+
+  parse_error(const error_type& type, const std::string& msg)
+      : msg_(msg)
+      , t_(type)
+  {
+  }
+
+private:
+  std::string msg_;
+  error_type t_;
+};
+
+using expected_parse_result_t = tl::expected<parse_result_t, parse_error>;
+
+expected_parse_result_t parse_input_from_pattern(std::string_view pattern,
+                                                 std::string_view input)
+{
+  auto parse_result = parse_result_t {};
+
+  {
+    auto current_pat = begin(pattern);
+    auto end_pat = end(pattern);
+
+    auto current_in = begin(input);
+    auto end_in = end(input);
+
+    bool capture = false;
+
+    auto get_pos = [&pattern](auto it) -> std::size_t
+    { return static_cast<std::size_t>(it - begin(pattern)); };
+
+    auto capturing_pattern_beg = current_pat;
+    auto capturing_pattern_end = current_pat;
+    auto capturing_input_beg = current_in;
+    auto capturing_input_end = current_in;
+
+    while (current_pat != end_pat) {
+      if (*current_pat == '{') {  // start capturing
+        if (capture) {
+          return tl::unexpected {parse_error {
+              parse_error::error_type::nestedBrace,
+              fmt::format("Unexpected nested '{{' in pattern at pos <{}>\n"sv,
+                          get_pos(current_pat))}};
+
+        } else {
+          capture = true;
+          capturing_pattern_beg = current_pat + 1;  // exclude opening {}
+          capturing_input_beg = current_in;
+        }
+      }
+
+      else if (*current_pat == '}')  // end capturing
+      {
+        if (!capture) {
+          return tl::unexpected {parse_error {
+              parse_error::error_type::unexpectedClosingBrace,
+              fmt::format("Unexpected closing '}}' in pattern at pos {}\n"sv,
+                          get_pos(current_pat))}};
+        } else {
+          capture = false;
+          capturing_pattern_end = current_pat;  // exclude closing }
+
+          // get next  caracter
+          auto capture_input_untill = capturing_pattern_end + 1;
+
+          if (capture_input_untill >= end_pat) {  // guard against end of stream
+            capturing_input_end = end_in;
+          } else {
+            // error case, there are two juxtaposed {}{}
+            if (*capture_input_untill == '{') {
+              return tl::unexpected {parse_error {
+                  parse_error::error_type::openingBraceJuxtaposedToClosingBrace,
+                  fmt::format(
+                      "Unexpected opening '{{' in pattern right next to a closing '}}' at pos {}\n "sv,
+                      get_pos(capture_input_untill))}};
+            } else {
+              do {
+                current_in++;
+              } while (*current_in != *capture_input_untill);
+
+              capturing_input_end = current_in;
+            }
+          }
+
+          parse_result.push_back(std::make_pair(
+              std::string_view {capturing_pattern_beg, capturing_pattern_end},
+              std::string_view {capturing_input_beg, capturing_input_end}));
+        }
+      } else if (!capture) {
+        if (*current_pat != *current_in) {
+          return tl::unexpected {parse_error {
+              parse_error::error_type::missmatchPatternAndInput,
+              fmt::format("Missmatch input '{}' and pattern '{}'\n"sv,
+                          *current_in,
+                          *current_pat)}};
+        } else {
+          ++current_in;
+        }
+      }
+
+      ++current_pat;
+    }
+  }
+
+  return parse_result;
+}
+
 template<class... ExpectedTypes>
 auto match_pattern(std::string_view pattern, std::string_view input)
 {
@@ -153,150 +282,29 @@ auto match_pattern(std::string_view pattern, std::string_view input)
   using std::ranges::end;
 
   // Debug
-  std::cout << fmt::format("pattern: {} ; input: {}\n", pattern, input);
+  std::cout << fmt::format("PATTERN: {} \nINPUT: {}\n", pattern, input);
 
-  using parse_result_t =
-      std::vector<std::pair<std::string_view, std::string_view>>;
+  auto parse_result = parse_input_from_pattern(pattern, input);
+  if (parse_result) {
+    auto res = *parse_result;
+    std::cout << fmt::format("Result size <{}>\n"sv, res.size());
 
-  auto parse_result = parse_result_t {};
-
-  {
-    auto beg_pat = begin(pattern);
-    auto end_pat = end(pattern);
-
-    auto beg_in = begin(input);
-    auto end_in = end(input);
-
-    bool capture = false;
-
-    auto capturing_pattern_beg = beg_pat;
-    auto capturing_pattern_end = beg_pat;
-    auto capturing_input_beg = beg_in;
-    auto capturing_input_end = beg_in;
-
-    while (beg_pat != end_pat) {
-      if (*beg_pat == '{') {  // start capturing
-        if (capture) {
-          std::cerr << fmt::format(
-              "Unexpected nested '{{' in pattern at pos {}\n"sv,
-              static_cast<std::size_t>(beg_pat - begin(pattern)));
-        } else {
-          capture = true;
-          capturing_pattern_beg = beg_pat + 1;
-          capturing_input_beg = beg_in;
-        }
-      }
-
-      else if (*beg_pat == '}')  // end capturing
-      {
-        if (!capture) {
-          std::cerr << fmt::format(
-              "Unexpected closing '}}' in pattern at pos {}\n"sv,
-              static_cast<std::size_t>(beg_pat - begin(pattern)));
-        } else {
-          capture = false;
-          capturing_pattern_end = beg_pat;
-
-          auto capture_input_untill = beg_pat + 1;
-          if (capture_input_untill >= end_pat)  // Capture till the end
-          {
-            capturing_input_end = end_in;
-            // the closing} and next { are adjacent : error
-          } else if (*capture_input_untill == '{') {
-            std::cerr << fmt::format(
-                "Unexpected opening '{{' in pattern right next to a closing '}}' at pos {}\n"sv,
-                static_cast<std::size_t>(capture_input_untill
-                                         - begin(pattern)));
-          } else {
-            std::cout << fmt::format(
-                "capturing untill <{}>\n",
-                static_cast<std::size_t>(capture_input_untill
-                                         - begin(pattern)));
-            do {
-              ++beg_in;
-            } while (*beg_in != *capture_input_untill);
-
-            capturing_input_end = beg_in;
-          }
-
-          std::cout << fmt::format(
-              "Pushing back <{}> <{}>\n",
-              std::string_view {capturing_pattern_beg, capturing_pattern_end},
-              std::string_view {capturing_input_beg, capturing_input_end});
-
-          parse_result.push_back(std::make_pair(
-              std::string_view {capturing_pattern_beg, capturing_pattern_end},
-              std::string_view {capturing_input_beg, capturing_input_end}));
-        }
-      }
-
-      if (!capture && *(beg_pat + 1) != *beg_in) {
-        std::cerr << fmt::format(
-            "Missmatch input '{}' and pattern '{}' at pos {}\n"sv,
-            *(beg_in + 1),
-            *beg_pat,
-            static_cast<std::size_t>((beg_pat + 1) - begin(pattern)));
-        return false;
-      }
-
-      ++beg_pat;  // continue pattern parsing
-
-      if (!capture) {
-        ++beg_in;
-      }
+    // Print result
+    for (auto&& [p, m] : res) {
+      std::cout << fmt::format("<{}> : <{}>\n"sv, p, m);
     }
-  }
-
-  // Print result
-  for (auto&& [p, m] : parse_result) {
-    std::cout << fmt::format("<{}> : <{}>"sv, p, m);
+  } else {
+    auto err = parse_result.error();
+    std::cerr << fmt::format("Unexpected error: {}", err.what()) << std::endl;
   }
 
   return true;
-
-  // group result is:
-  // 0: value before first } until first match
-  // 1: value inside {...}
-  // constexpr auto splitter = ctre::split<"\\{(.*?)\\}">;
-  // auto matches = splitter(pattern);
-  //
-  //// testing purpose, only handle empty {}
-  // for (auto [fixed_str, inside_braces] : matches) {
-  //   std::cout << fmt::format("Matches <{}> <{}>\n", fixed_str,
-  //   inside_braces);
-  //
-  //  if (fixed_str.size() == 0) {
-  //    auto found = std::ranges::search(
-  //        begin(input), end(input), begin(fixed_str), end(fixed_str));
-  //    if (found.empty())  // not found, input does not match
-  //    // fixed string of pattern
-  //    {
-  //      std::cout << fmt::format("Not found!\n");
-  //    } else {
-  //      std::cout << fmt::format("Found! <{}>\n", found);
-  //
-  //      // subrange
-  //      const auto subr_first = std::distance(begin(input), begin(found));
-  //      const auto subr_last = std::distance(begin(input), end(found));
-  //      // part to match against pattern inside {...}
-  //      const auto first = begin(input);
-  //      const auto last = begin(input) + subr_first;
-  //
-  //      std::cout << fmt::format("Splitter: <{}> | <{}> | <{}>\n",
-  //                               std::string_view(begin(input), end(input)),
-  //                               std::string_view(begin(input) + subr_first,
-  //                                                begin(input) + subr_last),
-  //                               std::string_view(first, last));
-  //    }
-  //  }
-  //}
-  // return false;
 }
 
 int main()
 {
   constexpr std::string_view input = "14 thus 10.5 gives 1001."sv;
-  constexpr std::string_view pattern = "{} thus {:10.5f} gives {}"sv;
+  constexpr std::string_view pattern = "{} thus {:10.5f} gives {}."sv;
 
   [[maybe_unused]] auto ret =
       match_pattern<int, float, std::string>(pattern, input);
