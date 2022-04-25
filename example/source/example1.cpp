@@ -17,6 +17,135 @@
 
 using namespace std::literals;
 
+struct parse_error
+{
+  enum class error_type
+  {
+    nestedBrace,
+    unexpectedClosingBrace,
+    openingBraceJuxtaposedToClosingBrace,
+    missmatchPatternAndInput
+  };
+
+  const std::string& what() const
+  {
+    return msg_;
+  }
+
+  auto type() const
+  {
+    return t_;
+  }
+
+  parse_error(const error_type& type, const std::string& msg)
+      : msg_(msg)
+      , t_(type)
+  {
+  }
+
+private:
+  std::string msg_;
+  error_type t_;
+};
+
+using parse_result_t =
+    std::vector<std::pair<std::string_view, std::string_view>>;
+
+using expected_parse_result_t = tl::expected<parse_result_t, parse_error>;
+
+expected_parse_result_t parse_input_from_pattern(std::string_view pattern,
+                                                 std::string_view input)
+{
+  auto parse_result = parse_result_t {};
+
+  {
+    auto current_pat = begin(pattern);
+    auto end_pat = end(pattern);
+
+    auto current_in = begin(input);
+    auto end_in = end(input);
+
+    bool capture = false;
+
+    auto get_pos = [&pattern](auto it) -> std::size_t
+    { return static_cast<std::size_t>(it - begin(pattern)); };
+
+    auto capturing_pattern_beg = current_pat;
+    auto capturing_pattern_end = current_pat;
+    auto capturing_input_beg = current_in;
+    auto capturing_input_end = current_in;
+
+    while (current_pat != end_pat) {
+      if (*current_pat == '{') {  // start capturing
+        if (capture) {
+          return tl::unexpected {parse_error {
+              parse_error::error_type::nestedBrace,
+              fmt::format("Unexpected nested '{{' in pattern at pos <{}>\n"sv,
+                          get_pos(current_pat))}};
+
+        } else {
+          capture = true;
+          capturing_pattern_beg = current_pat + 1;  // exclude opening {}
+          capturing_input_beg = current_in;
+        }
+      }
+
+      else if (*current_pat == '}')  // end capturing
+      {
+        if (!capture) {
+          return tl::unexpected {parse_error {
+              parse_error::error_type::unexpectedClosingBrace,
+              fmt::format("Unexpected closing '}}' in pattern at pos {}\n"sv,
+                          get_pos(current_pat))}};
+        } else {
+          capture = false;
+          capturing_pattern_end = current_pat;  // exclude closing }
+
+          // get next  caracter
+          auto capture_input_untill = capturing_pattern_end + 1;
+
+          if (capture_input_untill >= end_pat) {  // guard against end of stream
+            capturing_input_end = end_in;
+          } else {
+            // error case, there are two juxtaposed {}{}
+            if (*capture_input_untill == '{') {
+              return tl::unexpected {parse_error {
+                  parse_error::error_type::openingBraceJuxtaposedToClosingBrace,
+                  fmt::format(
+                      "Unexpected opening '{{' in pattern right next to a closing '}}' at pos {}\n "sv,
+                      get_pos(capture_input_untill))}};
+            } else {
+              do {
+                current_in++;
+              } while (*current_in != *capture_input_untill);
+
+              capturing_input_end = current_in;
+            }
+          }
+
+          parse_result.push_back(std::make_pair(
+              std::string_view {capturing_pattern_beg, capturing_pattern_end},
+              std::string_view {capturing_input_beg, capturing_input_end}));
+        }
+      } else if (!capture) {
+        if (*current_pat != *current_in) {
+          return tl::unexpected {parse_error {
+              parse_error::error_type::missmatchPatternAndInput,
+              fmt::format("Missmatch input '{}' and pattern '{}'\n"sv,
+                          *current_in,
+                          *current_pat)}};
+        } else {
+          ++current_in;
+        }
+      }
+
+      ++current_pat;
+    }
+  }
+
+  return parse_result;
+}
+
 enum class invalid_int
 {
   NotAnInt,
@@ -142,135 +271,6 @@ struct select_expected<std::string>
 
 template<class T>
 using select_expected_t = typename select_expected<T>::type;
-
-using parse_result_t =
-    std::vector<std::pair<std::string_view, std::string_view>>;
-
-struct parse_error
-{
-  enum class error_type
-  {
-    nestedBrace,
-    unexpectedClosingBrace,
-    openingBraceJuxtaposedToClosingBrace,
-    missmatchPatternAndInput
-  };
-
-  const std::string& what() const
-  {
-    return msg_;
-  }
-
-  auto type() const
-  {
-    return t_;
-  }
-
-  parse_error(const error_type& type, const std::string& msg)
-      : msg_(msg)
-      , t_(type)
-  {
-  }
-
-private:
-  std::string msg_;
-  error_type t_;
-};
-
-using expected_parse_result_t = tl::expected<parse_result_t, parse_error>;
-
-expected_parse_result_t parse_input_from_pattern(std::string_view pattern,
-                                                 std::string_view input)
-{
-  auto parse_result = parse_result_t {};
-
-  {
-    auto current_pat = begin(pattern);
-    auto end_pat = end(pattern);
-
-    auto current_in = begin(input);
-    auto end_in = end(input);
-
-    bool capture = false;
-
-    auto get_pos = [&pattern](auto it) -> std::size_t
-    { return static_cast<std::size_t>(it - begin(pattern)); };
-
-    auto capturing_pattern_beg = current_pat;
-    auto capturing_pattern_end = current_pat;
-    auto capturing_input_beg = current_in;
-    auto capturing_input_end = current_in;
-
-    while (current_pat != end_pat) {
-      if (*current_pat == '{') {  // start capturing
-        if (capture) {
-          return tl::unexpected {parse_error {
-              parse_error::error_type::nestedBrace,
-              fmt::format("Unexpected nested '{{' in pattern at pos <{}>\n"sv,
-                          get_pos(current_pat))}};
-
-        } else {
-          capture = true;
-          capturing_pattern_beg = current_pat + 1;  // exclude opening {}
-          capturing_input_beg = current_in;
-        }
-      }
-
-      else if (*current_pat == '}')  // end capturing
-      {
-        if (!capture) {
-          return tl::unexpected {parse_error {
-              parse_error::error_type::unexpectedClosingBrace,
-              fmt::format("Unexpected closing '}}' in pattern at pos {}\n"sv,
-                          get_pos(current_pat))}};
-        } else {
-          capture = false;
-          capturing_pattern_end = current_pat;  // exclude closing }
-
-          // get next  caracter
-          auto capture_input_untill = capturing_pattern_end + 1;
-
-          if (capture_input_untill >= end_pat) {  // guard against end of stream
-            capturing_input_end = end_in;
-          } else {
-            // error case, there are two juxtaposed {}{}
-            if (*capture_input_untill == '{') {
-              return tl::unexpected {parse_error {
-                  parse_error::error_type::openingBraceJuxtaposedToClosingBrace,
-                  fmt::format(
-                      "Unexpected opening '{{' in pattern right next to a closing '}}' at pos {}\n "sv,
-                      get_pos(capture_input_untill))}};
-            } else {
-              do {
-                current_in++;
-              } while (*current_in != *capture_input_untill);
-
-              capturing_input_end = current_in;
-            }
-          }
-
-          parse_result.push_back(std::make_pair(
-              std::string_view {capturing_pattern_beg, capturing_pattern_end},
-              std::string_view {capturing_input_beg, capturing_input_end}));
-        }
-      } else if (!capture) {
-        if (*current_pat != *current_in) {
-          return tl::unexpected {parse_error {
-              parse_error::error_type::missmatchPatternAndInput,
-              fmt::format("Missmatch input '{}' and pattern '{}'\n"sv,
-                          *current_in,
-                          *current_pat)}};
-        } else {
-          ++current_in;
-        }
-      }
-
-      ++current_pat;
-    }
-  }
-
-  return parse_result;
-}
 
 template<class... ExpectedTypes>
 auto match_pattern(std::string_view pattern, std::string_view input)
