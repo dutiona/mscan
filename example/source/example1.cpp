@@ -50,15 +50,64 @@ private:
   error_type t_;
 };
 
-using parse_result_t =
-    std::vector<std::pair<std::string_view, std::string_view>>;
+enum class invalid_int
+{
+  NotAnInt,
+  OutOfRange,
+  UnknownError
+};
+
+template<class Int>
+using expected_int_t = tl::expected<Int, invalid_int>;
+
+enum class invalid_float
+{
+  NotAFloat,
+  OutOfRange,
+  UnknownError
+};
+
+using expected_float_t = tl::expected<float, invalid_float>;
+
+enum class invalid_double
+{
+  NotADouble,
+  OutOfRange,
+  UnknownError
+};
+
+using expected_double_t = tl::expected<double, invalid_double>;
+
+enum class invalid_long_double
+{
+  NotALongDouble,
+  OutOfRange,
+  UnknownError
+};
+
+using expected_long_double_t = tl::expected<long double, invalid_long_double>;
+
+enum class invalid_string
+{
+  NotAString,
+  OutOfRange,
+  UnknownError
+};
+
+using expected_string_t = tl::expected<std::string, invalid_string>;
+
+using parse_result_t = std::vector<std::string_view
+/*std::variant<expected_int_t,
+                                                expected_float_t,
+                                                expected_double_t,
+                                                expected_string_t>*/>;
 
 using expected_parse_result_t = tl::expected<parse_result_t, parse_error>;
 
 // format mini-language
 /*
-  fill-and-align(optional) sign(optional) #(optional) 0(optional)
-  width(optional) precision(optional) L(optional) type(optional)
+  fill-and-align(optional) .precision(optional) grouping-separator(optional)
+  type(optional)
 
   fill-and-align is an optional fill character (which can be any character other
   than { or }), followed by one of the align options <,
@@ -73,39 +122,8 @@ using expected_parse_result_t = tl::expected<parse_result_t, parse_error>;
      ⌊n/2] characters before and ⌈n/2] characters after the value, where n is
      the total number of fill characters to insert.
 
-
-  The sign option can be one of following:
-
-  +: Indicates that a sign should be used for both non-negative and negative
-     numbers. The + sign is inserted before the output value for non-negative
-     numbers.
-  -: Indicates that a sign should be used for negative numbers only (this is the
-     default behavior).
-space: Indicates that a leading space should be used for non-negative numbers,
-       and a minus sign for negative numbers.
-
   Negative zero is treated as a negative number.
   The sign option applies to floating-point infinity and NaN.
-
-  The # option causes the alternate form to be used for the conversion. For
-  integral types, when binary, octal, or hexadecimal presentation type is used,
-  the alternate form inserts the prefix (0b, 0, or 0x) into the output value
-  after the sign character (possibly space) if there is one, or add it before
-  the output value otherwise.
-
-  For floating-point types, the alternate form causes the result of the
-  conversion of finite values to always contain a decimal-point character, even
-  if no digits follow it. Normally, a decimal-point character appears in the
-  result of these conversions only if a digit follows it. In addition, for g and
-  G conversions, trailing zeros are not removed from the result.
-
-  The 0 option pads the field with leading zeros (following any indication of
-  sign or base) to the field width, except when applied to an infinity or NaN.
-  If the 0 character and an align option both appear, the 0 character is
-  ignored.
-
-  width is either a positive decimal number, or a nested replacement field
-  ({} or {n}). If present, it specifies the minimum field width.
 
   precision is a dot (.) followed by either a non-negative decimal number or a
   nested replacement field. This field indicates the precision or maximum field
@@ -117,26 +135,6 @@ space: Indicates that a leading space should be used for non-negative numbers,
   whole extended grapheme clusters whose estimated width is no greater than the
   precision.
 
-  If a nested replacement field is used for width or precision, and the
-  corresponding argument is not of integral type, or is negative, or is zero for
-  width, an exception of type std::format_error is thrown.
-
-  For string types, the width is defined as the estimated number of column
-  positions appropriate for displaying it in a terminal.
-
-  The L option causes the locale-specific form to be used. This option is only
-  valid for arithmetic types.
-
-  For integral types, the locale-specific form inserts the appropriate digit
-  group separator characters according to the context's locale.
-
-  For floating-point types, the locale-specific form inserts the appropriate
-  digit group and radix separator characters according to the context's locale.
-
-  For the textual representation of bool, the locale-specific form uses the
-  appropriate string as if obtained with std::numpunct::truename or
-  std::numpunct::falsename.
-
   The type option determines how the data should be presented.
 
   The available string presentation types are:
@@ -145,135 +143,206 @@ space: Indicates that a leading space should be used for non-negative numbers,
   The available integer presentation types for integral types other
   than char, wchar_t, and bool are:
 
-    b: Binary format. Produces the output as if by calling std::to_chars(first,
-       last, value, 2). The base prefix is 0b.
-    B: same as b, except that the base prefix is 0B.
-    c: Copies the character static_cast<CharT>(value) to the output, where CharT
-       is the character type of the format string. Throws std::format_error if
-       value is not in the range of representable values for CharT.
-    d: Decimal format. Produces the output as if by calling std::to_chars(first,
-       last, value).
-    o: Octal format. Produces the output as if by calling std::to_chars(first,
+ b, B: Binary format. Pass base=2 to underlying from_char.
+ d, D: Decimal format. Pass base=10 to underlying from_char.
+ f, F: Floating point format. Call from_char into a float.
+ o, O: Octal format. Produces the output as if by calling std::to_chars(first,
        last, value, 8). The base prefix is 0 if the corresponding argument value
        is nonzero and is empty otherwise.
-    x: Hex format. Produces the output as if by calling std::to_chars(first,
+ x, X: Hex format. Produces the output as if by calling std::to_chars(first,
        last, value, 16). The base prefix is 0x. X: same as x, except that it
        uses uppercase letters for digits above 9 and the base prefix is 0X.
- none: same as d.
-
-  The available char and wchar_t presentation types are:
-
-    none, c: Copies the character to the output.
-    b, B, d, o, x, X: Uses integer presentation types.
-
+ none: same as s.
   The available bool presentation types are:
 
-none, s: Copies textual representation (true or false, or the
-         locale-specific form) to the output.
-b, B, c, d, o, x, X: Uses integer presentation types with the value
-                     static_cast<unsigned char>(value).
 
-  The available floating-point presentation types are:
-
-    a: If precision is specified, produces the output as if by calling
-       std::to_chars(first, last, value, std::chars_format::hex, precision)
-       where precision is the specified precision; otherwise, the output is
-       produced as if by calling std::to_chars(first, last, value,
-       std::chars_format::hex).
-    A: same as a, except that it uses uppercase letters for digits above 9 and
-       uses P to indicate the exponent.
-    e: Produces the output as if by calling std::to_chars(first, last, value,
-       std::chars_format::scientific, precision) where precision is the
-       specified precision, or 6 if precision is not specified.
-    E: same as e, except that it uses E to indicate the exponent.
- f, F: Produces the output as if by calling std::to_chars(first, last, value,
-       std::chars_format::fixed, precision) where precision is the specified
-       precision, or 6 if precision is not specified.
-    g: Produces the output as if by calling std::to_chars(first, last, value,
-       std::chars_format::general, precision) where precision is the specified
-       precision, or 6 if precision is not specified.
-    G: same as g, except that it uses E to indicate the exponent.
- none: If precision is specified, produces the output as if by calling
-       std::to_chars(first, last, value, std::chars_format::general, precision)
-       where precision is the specified precision; otherwise, the output is
-       produced as if by calling std::to_chars(first, last, value).
 
   For lower-case presentation types, infinity and NaN are formatted as
   inf and nan, respectively. For upper-case presentation types,
   infinity and NaN are formatted as INF and NAN, respectively.
-
-  The available pointer presentation types (also used for
-  std::nullptr_t) are:
-
-none, p: If std::uintptr_t is defined, produces the output as if by calling
-         std::to_chars(first, last, reinterpret_cast<std::uintptr_t>(value), 16)
-         with the prefix 0x added to the output; otherwise, the output is
-         implementation-defined.
 */
 struct scan_options
 {
   std::string_view fill_chr;
   std::string_view align;
-  std::string_view sign;
-  std::string_view alter_rep;
-  std::string_view width;
   std::string_view grouping;
   std::string_view prec;
   std::string_view type;
 
-  scan_options(std::string_view current_pattern);
+  constexpr scan_options(std::string_view current_pattern);
 
 private:
   std::string_view whole_;
   static constexpr auto pattern_matcher_ = ctre::match<
       "(?:([^\\{}])?(<|>|^))?"  // optional fill-and-align
-      "(\\+|-| )?"  // optional sign
-      "(#)?"  // optional # alternate rep
-      "([1-9][0-9]*)?"  // optional width
       "(?:\\.([1-9][0-9]*))?"  // optional precision
       "(_|,)?"  // optional grouping separator
-      "(s|b|B|c|d|o|x|X|a|A|e|E|f|F|g|G|p)?"  // optional type
+      "((?:l?u?(?:b|d|o|x))|(?:f|dbl|ldbl)|(?:s))?"  // optional type
       >;
 
   static constexpr auto default_fill_chr_ = " "sv;
   static constexpr auto default_align_ = "<"sv;
-  static constexpr auto default_sign_ = "-"sv;
-  static constexpr auto default_alter_rep_ = ""sv;
-  static constexpr auto default_width_ = ""sv;
-  static constexpr auto default_grouping_ = ""sv;
   static constexpr auto default_prec_ = ""sv;
+  static constexpr auto default_grouping_ = ""sv;
   static constexpr auto default_type_ = "s"sv;
 };
 
-scan_options::scan_options(std::string_view current_pattern)
+constexpr scan_options::scan_options(std::string_view current_pattern)
 {
-  auto [whole,
-        fill_chr_,
-        align_,
-        sign_,
-        alter_rep_,
-        width_,
-        grouping_,
-        prec_,
-        type_] = pattern_matcher_(current_pattern);
-  std::tie(
-      whole_, fill_chr, align, sign, alter_rep, width, grouping, prec, type) =
+  auto [whole, fill_chr_, align_, grouping_, prec_, type_] =
+      pattern_matcher_(current_pattern);
+  std::tie(whole_, fill_chr, align, grouping, prec, type) =
       std::tie(whole,
                fill_chr_ != ""sv ? fill_chr_ : default_fill_chr_,
                align_ != ""sv ? align_ : default_align_,
-               sign_ != ""sv ? sign_ : default_sign_,
-               alter_rep_ != ""sv ? alter_rep_ : default_alter_rep_,
-               width_ != ""sv ? width_ : default_width_,
                grouping_ != ""sv ? grouping_ : default_grouping_,
                prec_ != ""sv ? prec_ : default_prec_,
                type_ != ""sv ? type_ : default_type_);
 }
 
+template<class Int>
+expected_int_t<Int> cast_to_int(std::string_view input, int base = 10)
+{
+  Int result;
+  auto [ptr, err] =
+      std::from_chars(input.data(), input.data() + input.size(), result, base);
+  if (err == std::errc())  // OK
+    return result;
+  else {  // KO
+    if (err == std::errc::invalid_argument)  // not a number
+      return tl::unexpected {invalid_int::NotAnInt};
+    else if (err == std::errc::result_out_of_range)
+      return tl::unexpected {invalid_int::OutOfRange};
+    else
+      return tl::unexpected {invalid_int::UnknownError};
+  }
+}
+
+expected_float_t cast_to_float(std::string_view input)
+{
+  float result;
+  auto [ptr, err] =
+      std::from_chars(input.data(), input.data() + input.size(), result);
+  if (err == std::errc())  // OK
+    return result;
+  else {  // KO
+    if (err == std::errc::invalid_argument)  // not a number
+      return tl::unexpected {invalid_float::NotAFloat};
+    else if (err == std::errc::result_out_of_range)
+      return tl::unexpected {invalid_float::OutOfRange};
+    else
+      return tl::unexpected {invalid_float::UnknownError};
+  }
+}
+
+expected_double_t cast_to_double(std::string_view input)
+{
+  double result;
+  auto [ptr, err] =
+      std::from_chars(input.data(), input.data() + input.size(), result);
+  if (err == std::errc())  // OK
+    return result;
+  else {  // KO
+    if (err == std::errc::invalid_argument)  // not a number
+      return tl::unexpected {invalid_double::NotADouble};
+    else if (err == std::errc::result_out_of_range)
+      return tl::unexpected {invalid_double::OutOfRange};
+    else
+      return tl::unexpected {invalid_double::UnknownError};
+  }
+}
+
+expected_long_double_t cast_to_long_double(std::string_view input)
+{
+  long double result;
+  auto [ptr, err] =
+      std::from_chars(input.data(), input.data() + input.size(), result);
+  if (err == std::errc())  // OK
+    return result;
+  else {  // KO
+    if (err == std::errc::invalid_argument)  // not a number
+      return tl::unexpected {invalid_long_double::NotALongDouble};
+    else if (err == std::errc::result_out_of_range)
+      return tl::unexpected {invalid_long_double::OutOfRange};
+    else
+      return tl::unexpected {invalid_long_double::UnknownError};
+  }
+}
+
+constexpr std::variant<expected_string_t,
+                       expected_long_double_t,
+                       expected_double_t,
+                       expected_float_t,
+                       expected_int_t<int>,
+                       expected_int_t<long long>,
+                       expected_int_t<unsigned>,
+                       expected_int_t<long long unsigned>>
+construct_scanning_pipeline(std::string_view input, const scan_options& opts)
+{
+  auto vw = input
+      | std::views::filter(
+                [group_sep = opts.grouping](char c)
+                {
+                  if (group_sep != ""sv) {
+                    return c != group_sep[0];
+                  }
+                });
+
+  std::string tmp;
+  std::ranges::copy(vw, begin(tmp));
+  // default, plain string, ignore precision
+  if (opts.type == "s"sv) {
+    return tmp;
+  } else {  // unsigned, int, float, double, ...
+    // different cases:
+    // b,d,o,x,lb,ld,lo,lx,ub,ud,uo,ux,lub,lud,luo,lux,f,dlb,ldbl
+    if (opts.type == "b") {
+      return cast_to_int<int>(tmp, 2);
+    } else if (opts.type == "d"sv) {
+      return cast_to_int<int>(tmp, 10);
+    } else if (opts.type == "o"sv) {
+      return cast_to_int<int>(tmp, 8);
+    } else if (opts.type == "x"sv) {
+      return cast_to_int<int>(tmp, 16);
+    } else if (opts.type == "lb"sv) {
+      return cast_to_int<long long>(tmp, 2);
+    } else if (opts.type == "ld"sv) {
+      return cast_to_int<long long>(tmp, 10);
+    } else if (opts.type == "lo"sv) {
+      return cast_to_int<long long>(tmp, 8);
+    } else if (opts.type == "lx"sv) {
+      return cast_to_int<long long>(tmp, 16);
+    } else if (opts.type == "ub"sv) {
+      return cast_to_int<unsigned>(tmp, 2);
+    } else if (opts.type == "ud"sv) {
+      return cast_to_int<unsigned>(tmp, 10);
+    } else if (opts.type == "uo"sv) {
+      return cast_to_int<unsigned>(tmp, 8);
+    } else if (opts.type == "ux"sv) {
+      return cast_to_int<unsigned>(tmp, 16);
+    } else if (opts.type == "lub"sv) {
+      return cast_to_int<long long unsigned>(tmp, 2);
+    } else if (opts.type == "lud"sv) {
+      return cast_to_int<long long unsigned>(tmp, 10);
+    } else if (opts.type == "luo"sv) {
+      return cast_to_int<long long unsigned>(tmp, 8);
+    } else if (opts.type == "lux"sv) {
+      return cast_to_int<long long unsigned>(tmp, 16);
+    } else if (opts.type == "f"sv) {
+      return cast_to_float(tmp);
+    } else if (opts.type == "dbl"sv) {
+      return cast_to_double(tmp);
+    } else if (opts.type == "ldbl"sv) {
+      return cast_to_long_double(tmp);
+    }
+  }
+}
+
 template<class B, class E>
-auto scan_from_pattern(std::string_view pattern,
-                       char capture_until,
-                       B capturing_starting_point,
-                       E end_of_input)
+constexpr auto scan_from_pattern(std::string_view pattern,
+                                 char capture_until,
+                                 B capturing_starting_point,
+                                 E end_of_input)
 {
   auto options = scan_options {pattern};
   auto current = capturing_starting_point;
@@ -390,11 +459,8 @@ expected_parse_result_t parse_input_from_pattern(std::string_view pattern,
                 std::string_view {beg, end})
                       << std::endl;
 
-            parse_result.push_back(
-                std::make_pair(current_pattern,
-                               std::string_view {matched_captured_input_beg,
-                                                 matched_captured_input_end}));
-
+            parse_result.push_back(std::string_view {
+                matched_captured_input_beg, matched_captured_input_end});
             current_in = end;
           }
         }
@@ -418,93 +484,6 @@ expected_parse_result_t parse_input_from_pattern(std::string_view pattern,
   return parse_result;
 }
 
-enum class invalid_int
-{
-  NotAnInt,
-  OutOfRange,
-  UnknownError
-};
-
-using expected_int_t = tl::expected<int, invalid_int>;
-
-expected_int_t cast_to_int(std::string_view input)
-{
-  int result;
-  auto [ptr, err] =
-      std::from_chars(input.data(), input.data() + input.size(), result);
-  if (err == std::errc())  // OK
-    return result;
-  else {  // KO
-    if (err == std::errc::invalid_argument)  // not a number
-      return tl::unexpected {invalid_int::NotAnInt};
-    else if (err == std::errc::result_out_of_range)
-      return tl::unexpected {invalid_int::OutOfRange};
-    else
-      return tl::unexpected {invalid_int::UnknownError};
-  }
-}
-
-enum class invalid_float
-{
-  NotAFloat,
-  OutOfRange,
-  UnknownError
-};
-
-using expected_float_t = tl::expected<float, invalid_float>;
-
-expected_float_t cast_to_float(std::string_view input)
-{
-  float result;
-  auto [ptr, err] =
-      std::from_chars(input.data(), input.data() + input.size(), result);
-  if (err == std::errc())  // OK
-    return result;
-  else {  // KO
-    if (err == std::errc::invalid_argument)  // not a number
-      return tl::unexpected {invalid_float::NotAFloat};
-    else if (err == std::errc::result_out_of_range)
-      return tl::unexpected {invalid_float::OutOfRange};
-    else
-      return tl::unexpected {invalid_float::UnknownError};
-  }
-}
-
-enum class invalid_double
-{
-  NotADouble,
-  OutOfRange,
-  UnknownError
-};
-
-using expected_double_t = tl::expected<double, invalid_double>;
-
-expected_double_t cast_to_double(std::string_view input)
-{
-  double result;
-  auto [ptr, err] =
-      std::from_chars(input.data(), input.data() + input.size(), result);
-  if (err == std::errc())  // OK
-    return result;
-  else {  // KO
-    if (err == std::errc::invalid_argument)  // not a number
-      return tl::unexpected {invalid_double::NotADouble};
-    else if (err == std::errc::result_out_of_range)
-      return tl::unexpected {invalid_double::OutOfRange};
-    else
-      return tl::unexpected {invalid_double::UnknownError};
-  }
-}
-
-enum class invalid_string
-{
-  NotAString,
-  OutOfRange,
-  UnknownError
-};
-
-using expected_string_t = tl::expected<std::string, invalid_string>;
-
 template<typename T>
 inline constexpr bool always_false_v = false;
 
@@ -512,7 +491,7 @@ template<class To>
 requires std::is_same_v < std::remove_cvref_t<To>,
 int > auto cast_to(std::string_view sv)
 {
-  return cast_to_int(sv);
+  return cast_to_int<int>(sv);
 }
 
 template<class To>
@@ -548,7 +527,7 @@ struct select_expected
 template<>
 struct select_expected<int>
 {
-  using type = expected_int_t;
+  using type = expected_int_t<int>;
 };
 
 template<>
@@ -579,8 +558,8 @@ template<class... ExpectedTypes, typename F, size_t... Is>
 auto generate_resulting_tuple_impl(F func, std::index_sequence<Is...>)
 {
   using tuple_t = std::tuple<ExpectedTypes...>;
-  // FIXME cast_to should receive a pair of arg, one is info about prec, 2nd is
-  // actual parsed value
+  // FIXME cast_to should receive a pair of arg, one is info about prec, 2nd
+  // is actual parsed value
   return std::make_tuple(
       cast_to<decltype(std::get<Is>(std::declval<tuple_t>()))>(func(Is))...);
 }
@@ -605,7 +584,7 @@ expected_output_t<ExpectedTypes...> assemble_resulting_tuple(
       [&parse_result](std::size_t idx)
       {
         // FIXME fwd also first arg containing precision info
-        return parse_result[idx].second;  // keep only value of pattern
+        return parse_result[idx];  // keep only value of pattern
       });
 
   return expected_output;
@@ -627,8 +606,8 @@ auto match_pattern(std::string_view pattern, std::string_view input)
     std::cout << fmt::format("Result size <{}>\n"sv, res.size());
 
     // Print result
-    for (auto&& [p, m] : res) {
-      std::cout << fmt::format("<{}> : <{}>\n"sv, p, m);
+    for (auto&& m : res) {
+      std::cout << fmt::format("<{}>\n"sv, m);
     }
 
     auto ret = assemble_resulting_tuple<ExpectedTypes...>(res);
