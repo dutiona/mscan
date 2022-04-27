@@ -13,6 +13,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <tuple>
 #include <utility>
 #include <variant>
 
@@ -53,6 +54,258 @@ using parse_result_t =
     std::vector<std::pair<std::string_view, std::string_view>>;
 
 using expected_parse_result_t = tl::expected<parse_result_t, parse_error>;
+
+// format mini-language
+/*
+  fill-and-align(optional) sign(optional) #(optional) 0(optional)
+  width(optional) precision(optional) L(optional) type(optional)
+
+  fill-and-align is an optional fill character (which can be any character other
+  than { or }), followed by one of the align options <,
+  >, ^. The meaning of align options is as follows:
+
+  <: Forces the field to be aligned to the start of the available space. This is
+     the default when a non-integer non-floating-point presentation type is
+     used.
+  >: Forces the field to be aligned to the end of the available space. This is
+     the default when an integer or floating-point presentation type is used.
+  ^: Forces the field to be centered within the available space by inserting
+     ⌊n/2] characters before and ⌈n/2] characters after the value, where n is
+     the total number of fill characters to insert.
+
+
+  The sign option can be one of following:
+
+  +: Indicates that a sign should be used for both non-negative and negative
+     numbers. The + sign is inserted before the output value for non-negative
+     numbers.
+  -: Indicates that a sign should be used for negative numbers only (this is the
+     default behavior).
+space: Indicates that a leading space should be used for non-negative numbers,
+       and a minus sign for negative numbers.
+
+  Negative zero is treated as a negative number.
+  The sign option applies to floating-point infinity and NaN.
+
+  The # option causes the alternate form to be used for the conversion. For
+  integral types, when binary, octal, or hexadecimal presentation type is used,
+  the alternate form inserts the prefix (0b, 0, or 0x) into the output value
+  after the sign character (possibly space) if there is one, or add it before
+  the output value otherwise.
+
+  For floating-point types, the alternate form causes the result of the
+  conversion of finite values to always contain a decimal-point character, even
+  if no digits follow it. Normally, a decimal-point character appears in the
+  result of these conversions only if a digit follows it. In addition, for g and
+  G conversions, trailing zeros are not removed from the result.
+
+  The 0 option pads the field with leading zeros (following any indication of
+  sign or base) to the field width, except when applied to an infinity or NaN.
+  If the 0 character and an align option both appear, the 0 character is
+  ignored.
+
+  width is either a positive decimal number, or a nested replacement field
+  ({} or {n}). If present, it specifies the minimum field width.
+
+  precision is a dot (.) followed by either a non-negative decimal number or a
+  nested replacement field. This field indicates the precision or maximum field
+  size. It can only be used with floating-point and string types. For
+  floating-point types, this field specifies the formatting precision. For
+  string types, it provides an upper bound for the estimated width (see below)
+  of the prefix of the string to be copied to the output. For a string in a
+  Unicode encoding, the text to be copied to the output is the longest prefix of
+  whole extended grapheme clusters whose estimated width is no greater than the
+  precision.
+
+  If a nested replacement field is used for width or precision, and the
+  corresponding argument is not of integral type, or is negative, or is zero for
+  width, an exception of type std::format_error is thrown.
+
+  For string types, the width is defined as the estimated number of column
+  positions appropriate for displaying it in a terminal.
+
+  The L option causes the locale-specific form to be used. This option is only
+  valid for arithmetic types.
+
+  For integral types, the locale-specific form inserts the appropriate digit
+  group separator characters according to the context's locale.
+
+  For floating-point types, the locale-specific form inserts the appropriate
+  digit group and radix separator characters according to the context's locale.
+
+  For the textual representation of bool, the locale-specific form uses the
+  appropriate string as if obtained with std::numpunct::truename or
+  std::numpunct::falsename.
+
+  The type option determines how the data should be presented.
+
+  The available string presentation types are:
+    none, s: Copies the string to the output.
+
+  The available integer presentation types for integral types other
+  than char, wchar_t, and bool are:
+
+    b: Binary format. Produces the output as if by calling std::to_chars(first,
+       last, value, 2). The base prefix is 0b.
+    B: same as b, except that the base prefix is 0B.
+    c: Copies the character static_cast<CharT>(value) to the output, where CharT
+       is the character type of the format string. Throws std::format_error if
+       value is not in the range of representable values for CharT.
+    d: Decimal format. Produces the output as if by calling std::to_chars(first,
+       last, value).
+    o: Octal format. Produces the output as if by calling std::to_chars(first,
+       last, value, 8). The base prefix is 0 if the corresponding argument value
+       is nonzero and is empty otherwise.
+    x: Hex format. Produces the output as if by calling std::to_chars(first,
+       last, value, 16). The base prefix is 0x. X: same as x, except that it
+       uses uppercase letters for digits above 9 and the base prefix is 0X.
+ none: same as d.
+
+  The available char and wchar_t presentation types are:
+
+    none, c: Copies the character to the output.
+    b, B, d, o, x, X: Uses integer presentation types.
+
+  The available bool presentation types are:
+
+none, s: Copies textual representation (true or false, or the
+         locale-specific form) to the output.
+b, B, c, d, o, x, X: Uses integer presentation types with the value
+                     static_cast<unsigned char>(value).
+
+  The available floating-point presentation types are:
+
+    a: If precision is specified, produces the output as if by calling
+       std::to_chars(first, last, value, std::chars_format::hex, precision)
+       where precision is the specified precision; otherwise, the output is
+       produced as if by calling std::to_chars(first, last, value,
+       std::chars_format::hex).
+    A: same as a, except that it uses uppercase letters for digits above 9 and
+       uses P to indicate the exponent.
+    e: Produces the output as if by calling std::to_chars(first, last, value,
+       std::chars_format::scientific, precision) where precision is the
+       specified precision, or 6 if precision is not specified.
+    E: same as e, except that it uses E to indicate the exponent.
+ f, F: Produces the output as if by calling std::to_chars(first, last, value,
+       std::chars_format::fixed, precision) where precision is the specified
+       precision, or 6 if precision is not specified.
+    g: Produces the output as if by calling std::to_chars(first, last, value,
+       std::chars_format::general, precision) where precision is the specified
+       precision, or 6 if precision is not specified.
+    G: same as g, except that it uses E to indicate the exponent.
+ none: If precision is specified, produces the output as if by calling
+       std::to_chars(first, last, value, std::chars_format::general, precision)
+       where precision is the specified precision; otherwise, the output is
+       produced as if by calling std::to_chars(first, last, value).
+
+  For lower-case presentation types, infinity and NaN are formatted as
+  inf and nan, respectively. For upper-case presentation types,
+  infinity and NaN are formatted as INF and NAN, respectively.
+
+  The available pointer presentation types (also used for
+  std::nullptr_t) are:
+
+none, p: If std::uintptr_t is defined, produces the output as if by calling
+         std::to_chars(first, last, reinterpret_cast<std::uintptr_t>(value), 16)
+         with the prefix 0x added to the output; otherwise, the output is
+         implementation-defined.
+*/
+struct scan_options
+{
+  std::string_view fill_chr;
+  std::string_view align;
+  std::string_view sign;
+  std::string_view alter_rep;
+  std::string_view width;
+  std::string_view grouping;
+  std::string_view prec;
+  std::string_view type;
+
+  scan_options(std::string_view current_pattern);
+
+private:
+  std::string_view whole_;
+  static constexpr auto pattern_matcher_ = ctre::match<
+      "(?:([^\\{}])?(<|>|^))?"  // optional fill-and-align
+      "(\\+|-| )?"  // optional sign
+      "(#)?"  // optional # alternate rep
+      "([1-9][0-9]*)?"  // optional width
+      "(?:\\.([1-9][0-9]*))?"  // optional precision
+      "(_|,)?"  // optional grouping separator
+      "(s|b|B|c|d|o|x|X|a|A|e|E|f|F|g|G|p)?"  // optional type
+      >;
+
+  static constexpr auto default_fill_chr_ = " "sv;
+  static constexpr auto default_align_ = "<"sv;
+  static constexpr auto default_sign_ = "-"sv;
+  static constexpr auto default_alter_rep_ = ""sv;
+  static constexpr auto default_width_ = ""sv;
+  static constexpr auto default_grouping_ = ""sv;
+  static constexpr auto default_prec_ = ""sv;
+  static constexpr auto default_type_ = "s"sv;
+};
+
+scan_options::scan_options(std::string_view current_pattern)
+{
+  auto [whole,
+        fill_chr_,
+        align_,
+        sign_,
+        alter_rep_,
+        width_,
+        grouping_,
+        prec_,
+        type_] = pattern_matcher_(current_pattern);
+  std::tie(
+      whole_, fill_chr, align, sign, alter_rep, width, grouping, prec, type) =
+      std::tie(whole,
+               fill_chr_ != ""sv ? fill_chr_ : default_fill_chr_,
+               align_ != ""sv ? align_ : default_align_,
+               sign_ != ""sv ? sign_ : default_sign_,
+               alter_rep_ != ""sv ? alter_rep_ : default_alter_rep_,
+               width_ != ""sv ? width_ : default_width_,
+               grouping_ != ""sv ? grouping_ : default_grouping_,
+               prec_ != ""sv ? prec_ : default_prec_,
+               type_ != ""sv ? type_ : default_type_);
+}
+
+template<class B, class E>
+auto scan_from_pattern(std::string_view pattern,
+                       char capture_until,
+                       B capturing_starting_point,
+                       E end_of_input)
+{
+  auto options = scan_options {pattern};
+  auto current = capturing_starting_point;
+
+  // left padding
+  if (options.align == ">"sv || options.align == "^"sv)  // align right/center
+  {
+    while (current != end_of_input && *current == options.fill_chr[0]) {
+      current++;
+    }
+  }
+
+  // actual match
+  auto actual_ret_beg = current;
+  do {
+    current++;
+  } while (current != end_of_input && *current != capture_until);
+  auto actual_ret_end = current;
+
+  // right padding
+  if (options.align == "<"sv || options.align == "^"sv)  // align left/center
+  {
+    while (current + 1 != end_of_input && *(current + 1) == options.fill_chr[0])
+    {
+      current++;
+    }
+  }
+
+  // return detailed result
+  return std::make_tuple(
+      actual_ret_beg, actual_ret_end, capturing_starting_point, current);
+}
 
 expected_parse_result_t parse_input_from_pattern(std::string_view pattern,
                                                  std::string_view input)
@@ -101,33 +354,51 @@ expected_parse_result_t parse_input_from_pattern(std::string_view pattern,
         } else {
           capture = false;
           capturing_pattern_end = current_pat;  // exclude closing }
-
-          // get next  caracter
-          auto capture_input_untill = capturing_pattern_end + 1;
-
-          if (capture_input_untill >= end_pat) {  // guard against end of stream
-            capturing_input_end = end_in;
-          } else {
-            // error case, there are two juxtaposed {}{}
-            if (*capture_input_untill == '{') {
-              return tl::unexpected {parse_error {
-                  parse_error::error_type::openingBraceJuxtaposedToClosingBrace,
-                  fmt::format(
-                      "Unexpected opening '{{' in pattern right next to a closing '}}' at pos {}\n "sv,
-                      get_pos(capture_input_untill))}};
-            } else {
-              do {
-                current_in++;
-              } while (*current_in != *capture_input_untill);
-
-              capturing_input_end = current_in;
-            }
-          }
-
-          parse_result.push_back(std::make_pair(
-              std::string_view {capturing_pattern_beg, capturing_pattern_end},
-              std::string_view {capturing_input_beg, capturing_input_end}));
         }
+
+        auto current_pattern =
+            std::string_view {capturing_pattern_beg, capturing_pattern_end};
+
+        // get next  caracter
+        auto capture_input_until = capturing_pattern_end + 1;
+
+        if (capture_input_until >= end_pat) {  // guard against end of stream
+          capturing_input_end = end_in;
+        } else {
+          // error case, there are two juxtaposed {}{}
+          if (*capture_input_until == '{') {
+            return tl::unexpected {parse_error {
+                parse_error::error_type::openingBraceJuxtaposedToClosingBrace,
+                fmt::format(
+                    "Unexpected opening '{{' in pattern right next to a closing '}}' at pos {}\n "sv,
+                    get_pos(capture_input_until))}};
+          } else {
+            // we match formatting pattern against the regex
+            auto [matched_captured_input_beg,
+                  matched_captured_input_end,
+                  beg,
+                  end] = scan_from_pattern(current_pattern,
+                                           *capture_input_until,
+                                           current_in,
+                                           capturing_input_end);
+
+            std::cout << fmt::format(
+                "Pattern: <{}>, Captured <{}>, Parsed <{}>",
+                current_pattern,
+                std::string_view {matched_captured_input_beg,
+                                  matched_captured_input_end},
+                std::string_view {beg, end})
+                      << std::endl;
+
+            parse_result.push_back(
+                std::make_pair(current_pattern,
+                               std::string_view {matched_captured_input_beg,
+                                                 matched_captured_input_end}));
+
+            current_in = end;
+          }
+        }
+
       } else if (!capture) {
         if (*current_pat != *current_in) {
           return tl::unexpected {parse_error {
@@ -305,7 +576,7 @@ template<class... ExpectedTypes>
 using expected_output_t = std::tuple<select_expected_t<ExpectedTypes>...>;
 
 template<class... ExpectedTypes, typename F, size_t... Is>
-auto gen_tuple_impl(F func, std::index_sequence<Is...>)
+auto generate_resulting_tuple_impl(F func, std::index_sequence<Is...>)
 {
   using tuple_t = std::tuple<ExpectedTypes...>;
   // FIXME cast_to should receive a pair of arg, one is info about prec, 2nd is
@@ -315,9 +586,10 @@ auto gen_tuple_impl(F func, std::index_sequence<Is...>)
 }
 
 template<size_t N, class... ExpectedTypes, typename F>
-auto gen_tuple(F func)
+auto generate_resulting_tuple(F func)
 {
-  return gen_tuple_impl<ExpectedTypes...>(func, std::make_index_sequence<N> {});
+  return generate_resulting_tuple_impl<ExpectedTypes...>(
+      func, std::make_index_sequence<N> {});
 }
 
 template<class... ExpectedTypes>
@@ -329,7 +601,7 @@ expected_output_t<ExpectedTypes...> assemble_resulting_tuple(
   assert(nb_matches == parse_result.size()
          && "Error! Size of result tuple and parsed result does not match!");
 
-  auto expected_output = gen_tuple<nb_matches, ExpectedTypes...>(
+  auto expected_output = generate_resulting_tuple<nb_matches, ExpectedTypes...>(
       [&parse_result](std::size_t idx)
       {
         // FIXME fwd also first arg containing precision info
@@ -374,8 +646,8 @@ auto match_pattern(std::string_view pattern, std::string_view input)
 
 int main()
 {
-  constexpr std::string_view input = "14 thus 10.5 gives 1001."sv;
-  constexpr std::string_view pattern = "{} thus {:10.5f} gives {}."sv;
+  constexpr std::string_view input = "14 thus 10.5    gives      1001."sv;
+  constexpr std::string_view pattern = "{} thus {:10.5f} gives {>}."sv;
 
   [[maybe_unused]] auto ret =
       match_pattern<int, float, std::string>(pattern, input);
