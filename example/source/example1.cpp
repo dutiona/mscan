@@ -7,8 +7,10 @@
 #include <algorithm>
 #include <cassert>
 #include <charconv>
+#include <cmath>
 #include <concepts>
 #include <iostream>
+#include <limits>
 #include <ranges>
 #include <string>
 #include <string_view>
@@ -16,6 +18,15 @@
 #include <tuple>
 #include <utility>
 #include <variant>
+
+template<class Ret = long long>
+constexpr Ret pow10(int n)
+{
+  long long result = 1;
+  for (int i = 1; i <= n; ++i)
+    result *= 10;
+  return static_cast<Ret>(result);
+}
 
 using namespace std::literals;
 
@@ -218,13 +229,16 @@ expected_int_t<Int> cast_to_int(std::string_view input, int base = 10)
   }
 }
 
-expected_float_t cast_to_float(std::string_view input)
+expected_float_t cast_to_float(
+    std::string_view input,
+    unsigned prec = std::numeric_limits<float>::digits10)
 {
   float result;
+  auto mult = pow10<float>(prec);
   auto [ptr, err] =
       std::from_chars(input.data(), input.data() + input.size(), result);
   if (err == std::errc())  // OK
-    return result;
+    return std::round(result * mult) / mult;
   else {  // KO
     if (err == std::errc::invalid_argument)  // not a number
       return tl::unexpected {invalid_float::NotAFloat};
@@ -235,13 +249,16 @@ expected_float_t cast_to_float(std::string_view input)
   }
 }
 
-expected_double_t cast_to_double(std::string_view input)
+expected_double_t cast_to_double(
+    std::string_view input,
+    unsigned prec = std::numeric_limits<double>::digits10)
 {
   double result;
+  auto mult = pow10<double>(prec);
   auto [ptr, err] =
       std::from_chars(input.data(), input.data() + input.size(), result);
   if (err == std::errc())  // OK
-    return result;
+    return std::round(result * mult) / mult;
   else {  // KO
     if (err == std::errc::invalid_argument)  // not a number
       return tl::unexpected {invalid_double::NotADouble};
@@ -252,13 +269,16 @@ expected_double_t cast_to_double(std::string_view input)
   }
 }
 
-expected_long_double_t cast_to_long_double(std::string_view input)
+expected_long_double_t cast_to_long_double(
+    std::string_view input,
+    unsigned prec = std::numeric_limits<long double>::digits10)
 {
   long double result;
+  auto mult = pow10<long double>(prec);
   auto [ptr, err] =
       std::from_chars(input.data(), input.data() + input.size(), result);
   if (err == std::errc())  // OK
-    return result;
+    return std::round(result * mult) / mult;
   else {  // KO
     if (err == std::errc::invalid_argument)  // not a number
       return tl::unexpected {invalid_long_double::NotALongDouble};
@@ -277,7 +297,7 @@ constexpr std::variant<expected_string_t,
                        expected_int_t<long long>,
                        expected_int_t<unsigned>,
                        expected_int_t<long long unsigned>>
-construct_scanning_pipeline(std::string_view input, const scan_options& opts)
+perform_scanning_pipeline(std::string_view input, const scan_options& opts)
 {
   auto vw = input
       | std::views::filter(
@@ -290,12 +310,15 @@ construct_scanning_pipeline(std::string_view input, const scan_options& opts)
 
   std::string tmp;
   std::ranges::copy(vw, begin(tmp));
-  // default, plain string, ignore precision
+  //  default, plain string, ignore precision
   if (opts.type == "s"sv) {
     return tmp;
   } else {  // unsigned, int, float, double, ...
     // different cases:
     // b,d,o,x,lb,ld,lo,lx,ub,ud,uo,ux,lub,lud,luo,lux,f,dlb,ldbl
+    // compute precision
+    auto prec = cast_to_int<unsigned>(opts.prec);
+    // integers, ignore precision
     if (opts.type == "b") {
       return cast_to_int<int>(tmp, 2);
     } else if (opts.type == "d"sv) {
@@ -328,12 +351,24 @@ construct_scanning_pipeline(std::string_view input, const scan_options& opts)
       return cast_to_int<long long unsigned>(tmp, 8);
     } else if (opts.type == "lux"sv) {
       return cast_to_int<long long unsigned>(tmp, 16);
-    } else if (opts.type == "f"sv) {
-      return cast_to_float(tmp);
-    } else if (opts.type == "dbl"sv) {
-      return cast_to_double(tmp);
-    } else if (opts.type == "ldbl"sv) {
-      return cast_to_long_double(tmp);
+    } else {
+      if (prec) {
+        if (opts.type == "f"sv) {
+          return cast_to_float(tmp, *prec);
+        } else if (opts.type == "dbl"sv) {
+          return cast_to_double(tmp, *prec);
+        } else if (opts.type == "ldbl"sv) {
+          return cast_to_long_double(tmp, *prec);
+        }
+      } else {
+        if (opts.type == "f"sv) {
+          return cast_to_float(tmp);
+        } else if (opts.type == "dbl"sv) {
+          return cast_to_double(tmp);
+        } else if (opts.type == "ldbl"sv) {
+          return cast_to_long_double(tmp);
+        }
+      }
     }
   }
 }
