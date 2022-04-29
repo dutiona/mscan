@@ -16,6 +16,7 @@
 #include <string_view>
 #include <system_error>
 #include <tuple>
+#include <typeinfo>
 #include <utility>
 #include <variant>
 
@@ -102,16 +103,22 @@ enum class invalid_string
 {
   NotAString,
   OutOfRange,
+  ValueTooLarge,
   UnknownError
 };
 
 using expected_string_t = tl::expected<std::string, invalid_string>;
 
-using parse_result_t = std::vector<std::string_view
-/*std::variant<expected_int_t,
-                                                expected_float_t,
-                                                expected_double_t,
-                                                expected_string_t>*/>;
+using expected_variant_t = std::variant<expected_string_t,
+                                        expected_long_double_t,
+                                        expected_double_t,
+                                        expected_float_t,
+                                        expected_int_t<int>,
+                                        expected_int_t<long long>,
+                                        expected_int_t<unsigned>,
+                                        expected_int_t<long long unsigned>>;
+
+using parse_result_t = std::vector<expected_variant_t>;
 
 using expected_parse_result_t = tl::expected<parse_result_t, parse_error>;
 
@@ -185,10 +192,10 @@ struct scan_options
 private:
   std::string_view whole_;
   static constexpr auto pattern_matcher_ = ctre::match<
-      "(?:([^\\{}])?(<|>|^))?"  // optional fill-and-align
+      "(?:([^\\{}])?(<|>|\\^))?"  // optional fill-and-align
       "(?:\\.([1-9][0-9]*))?"  // optional precision
       "(_|,)?"  // optional grouping separator
-      "((?:l?u?(?:b|d|o|x))|(?:f|dbl|ldbl)|(?:s))?"  // optional type
+      "(s|(?:l?u?(?:b|d|o|x))|(?:f|(?:l?dbl)))?"  // optional type
       >;
 
   static constexpr auto default_fill_chr_ = " "sv;
@@ -200,19 +207,20 @@ private:
 
 constexpr scan_options::scan_options(std::string_view current_pattern)
 {
-  auto [whole, fill_chr_, align_, grouping_, prec_, type_] =
+  auto [whole, fill_chr_, align_, prec_, grouping_, type_] =
       pattern_matcher_(current_pattern);
-  std::tie(whole_, fill_chr, align, grouping, prec, type) =
+  std::tie(whole_, fill_chr, align, prec, grouping, type) =
       std::tie(whole,
                fill_chr_ != ""sv ? fill_chr_ : default_fill_chr_,
                align_ != ""sv ? align_ : default_align_,
-               grouping_ != ""sv ? grouping_ : default_grouping_,
                prec_ != ""sv ? prec_ : default_prec_,
+               grouping_ != ""sv ? grouping_ : default_grouping_,
                type_ != ""sv ? type_ : default_type_);
 }
 
-template<class Int>
-expected_int_t<Int> cast_to_int(std::string_view input, int base = 10)
+template<class Int, class From>
+requires std::is_same_v<From, std::string_view>  //
+    expected_int_t<Int> cast_to_int(const From& input, int base = 10)
 {
   Int result;
   auto [ptr, err] =
@@ -229,9 +237,24 @@ expected_int_t<Int> cast_to_int(std::string_view input, int base = 10)
   }
 }
 
-expected_float_t cast_to_float(
-    std::string_view input,
-    unsigned prec = std::numeric_limits<float>::digits10)
+template<class Int, class From>
+requires std::is_floating_point_v<std::remove_cvref_t<From>>  //
+    expected_int_t<Int> cast_to_int(From&& input)
+{
+  return static_cast<Int>(std::forward<From>(input));
+}
+
+template<class Int, class From>
+requires std::is_integral_v<std::remove_cvref_t<From>>  //
+    expected_int_t<Int> cast_to_int(From&& input)
+{
+  return static_cast<Int>(std::forward<From>(input));
+}
+
+template<class From>
+requires std::is_same_v<std::remove_cvref_t<From>, std::string_view>  //
+    expected_float_t cast_to_float(
+        const From& input, unsigned prec = std::numeric_limits<float>::digits10)
 {
   float result;
   auto mult = pow10<float>(prec);
@@ -249,9 +272,29 @@ expected_float_t cast_to_float(
   }
 }
 
-expected_double_t cast_to_double(
-    std::string_view input,
-    unsigned prec = std::numeric_limits<double>::digits10)
+template<class From>
+requires std::is_integral_v<std::remove_cvref_t<From>>  //
+    expected_float_t
+    cast_to_float(From&& input, unsigned = std::numeric_limits<float>::digits10)
+{
+  return static_cast<float>(std::forward<From>(input));
+}
+
+template<class From>
+requires std::is_floating_point_v<std::remove_cvref_t<From>>  //
+    expected_float_t cast_to_float(
+        From&& input, unsigned prec = std::numeric_limits<float>::digits10)
+{
+  auto mult = pow10<float>(prec);
+  return static_cast<float>(std::round(std::forward<From>(input) * mult)
+                            / mult);
+}
+
+template<class From>
+requires std::is_same_v<std::remove_cvref_t<From>, std::string_view>  //
+    expected_double_t
+    cast_to_double(const From& input,
+                   unsigned prec = std::numeric_limits<double>::digits10)
 {
   double result;
   auto mult = pow10<double>(prec);
@@ -269,9 +312,29 @@ expected_double_t cast_to_double(
   }
 }
 
-expected_long_double_t cast_to_long_double(
-    std::string_view input,
-    unsigned prec = std::numeric_limits<long double>::digits10)
+template<class From>
+requires std::is_integral_v<std::remove_cvref_t<From>>  //
+    expected_double_t cast_to_double(
+        From&& input, unsigned = std::numeric_limits<double>::digits10)
+{
+  return static_cast<double>(std::forward<From>(input));
+}
+
+template<class From>
+requires std::is_floating_point_v<std::remove_cvref_t<From>>  //
+    expected_float_t cast_to_double(
+        From&& input, unsigned prec = std::numeric_limits<float>::digits10)
+{
+  auto mult = pow10<double>(prec);
+  return static_cast<double>(std::round(std::forward<From>(input) * mult)
+                             / mult);
+}
+
+template<class From>
+requires std::is_same_v<std::remove_cvref_t<From>, std::string_view>  //
+    expected_long_double_t cast_to_long_double(
+        const From& input,
+        unsigned prec = std::numeric_limits<long double>::digits10)
 {
   long double result;
   auto mult = pow10<long double>(prec);
@@ -289,27 +352,42 @@ expected_long_double_t cast_to_long_double(
   }
 }
 
-constexpr std::variant<expected_string_t,
-                       expected_long_double_t,
-                       expected_double_t,
-                       expected_float_t,
-                       expected_int_t<int>,
-                       expected_int_t<long long>,
-                       expected_int_t<unsigned>,
-                       expected_int_t<long long unsigned>>
+template<class From>
+requires std::is_integral_v<std::remove_cvref_t<From>>  //
+    expected_long_double_t cast_to_long_double(
+        From&& input, unsigned = std::numeric_limits<long double>::digits10)
+{
+  return static_cast<long double>(std::forward<From>(input));
+}
+
+template<class From>
+requires std::is_floating_point_v<std::remove_cvref_t<From>>  //
+    expected_long_double_t cast_to_long_double(
+        From&& input,
+        unsigned prec = std::numeric_limits<long double>::digits10)
+{
+  auto mult = pow10<long double>(prec);
+  return static_cast<long double>(std::round(std::forward<From>(input) * mult)
+                                  / mult);
+}
+
+std::variant<expected_string_t,
+             expected_long_double_t,
+             expected_double_t,
+             expected_float_t,
+             expected_int_t<int>,
+             expected_int_t<long long>,
+             expected_int_t<unsigned>,
+             expected_int_t<long long unsigned>>
 perform_scanning_pipeline(std::string_view input, const scan_options& opts)
 {
-  auto vw = input
-      | std::views::filter(
-                [group_sep = opts.grouping](char c)
-                {
-                  if (group_sep != ""sv) {
-                    return c != group_sep[0];
-                  }
-                });
-
   std::string tmp;
-  std::ranges::copy(vw, begin(tmp));
+  if (opts.grouping != ""sv)
+    std::ranges::remove_copy(
+        begin(input), end(input), back_inserter(tmp), opts.grouping[0]);
+  else
+    std::ranges::copy(begin(input), end(input), back_inserter(tmp));
+
   //  default, plain string, ignore precision
   if (opts.type == "s"sv) {
     return tmp;
@@ -317,56 +395,62 @@ perform_scanning_pipeline(std::string_view input, const scan_options& opts)
     // different cases:
     // b,d,o,x,lb,ld,lo,lx,ub,ud,uo,ux,lub,lud,luo,lux,f,dlb,ldbl
     // compute precision
-    auto prec = cast_to_int<unsigned>(opts.prec);
+    auto prec = opts.prec != ""sv ? cast_to_int<unsigned>(opts.prec)
+                                  : tl::unexpected {invalid_int::NotAnInt};
+    auto tmp_sv = std::string_view {begin(tmp), end(tmp)};
     // integers, ignore precision
     if (opts.type == "b") {
-      return cast_to_int<int>(tmp, 2);
+      return cast_to_int<int>(tmp_sv, 2);
     } else if (opts.type == "d"sv) {
-      return cast_to_int<int>(tmp, 10);
+      return cast_to_int<int>(tmp_sv, 10);
     } else if (opts.type == "o"sv) {
-      return cast_to_int<int>(tmp, 8);
+      return cast_to_int<int>(tmp_sv, 8);
     } else if (opts.type == "x"sv) {
-      return cast_to_int<int>(tmp, 16);
+      return cast_to_int<int>(tmp_sv, 16);
     } else if (opts.type == "lb"sv) {
-      return cast_to_int<long long>(tmp, 2);
+      return cast_to_int<long long>(tmp_sv, 2);
     } else if (opts.type == "ld"sv) {
-      return cast_to_int<long long>(tmp, 10);
+      return cast_to_int<long long>(tmp_sv, 10);
     } else if (opts.type == "lo"sv) {
-      return cast_to_int<long long>(tmp, 8);
+      return cast_to_int<long long>(tmp_sv, 8);
     } else if (opts.type == "lx"sv) {
-      return cast_to_int<long long>(tmp, 16);
+      return cast_to_int<long long>(tmp_sv, 16);
     } else if (opts.type == "ub"sv) {
-      return cast_to_int<unsigned>(tmp, 2);
+      return cast_to_int<unsigned>(tmp_sv, 2);
     } else if (opts.type == "ud"sv) {
-      return cast_to_int<unsigned>(tmp, 10);
+      return cast_to_int<unsigned>(tmp_sv, 10);
     } else if (opts.type == "uo"sv) {
-      return cast_to_int<unsigned>(tmp, 8);
+      return cast_to_int<unsigned>(tmp_sv, 8);
     } else if (opts.type == "ux"sv) {
-      return cast_to_int<unsigned>(tmp, 16);
+      return cast_to_int<unsigned>(tmp_sv, 16);
     } else if (opts.type == "lub"sv) {
-      return cast_to_int<long long unsigned>(tmp, 2);
+      return cast_to_int<long long unsigned>(tmp_sv, 2);
     } else if (opts.type == "lud"sv) {
-      return cast_to_int<long long unsigned>(tmp, 10);
+      return cast_to_int<long long unsigned>(tmp_sv, 10);
     } else if (opts.type == "luo"sv) {
-      return cast_to_int<long long unsigned>(tmp, 8);
+      return cast_to_int<long long unsigned>(tmp_sv, 8);
     } else if (opts.type == "lux"sv) {
-      return cast_to_int<long long unsigned>(tmp, 16);
+      return cast_to_int<long long unsigned>(tmp_sv, 16);
     } else {
       if (prec) {
         if (opts.type == "f"sv) {
-          return cast_to_float(tmp, *prec);
+          return cast_to_float(tmp_sv, *prec);
         } else if (opts.type == "dbl"sv) {
-          return cast_to_double(tmp, *prec);
+          return cast_to_double(tmp_sv, *prec);
         } else if (opts.type == "ldbl"sv) {
-          return cast_to_long_double(tmp, *prec);
+          return cast_to_long_double(tmp_sv, *prec);
+        } else {
+          return tmp;
         }
       } else {
         if (opts.type == "f"sv) {
-          return cast_to_float(tmp);
+          return cast_to_float(tmp_sv);
         } else if (opts.type == "dbl"sv) {
-          return cast_to_double(tmp);
+          return cast_to_double(tmp_sv);
         } else if (opts.type == "ldbl"sv) {
-          return cast_to_long_double(tmp);
+          return cast_to_long_double(tmp_sv);
+        } else {
+          return tmp;
         }
       }
     }
@@ -374,12 +458,23 @@ perform_scanning_pipeline(std::string_view input, const scan_options& opts)
 }
 
 template<class B, class E>
-constexpr auto scan_from_pattern(std::string_view pattern,
-                                 char capture_until,
-                                 B capturing_starting_point,
-                                 E end_of_input)
+auto scan_from_pattern(std::string_view pattern,
+                       char capture_until,
+                       B capturing_starting_point,
+                       E end_of_input)
 {
   auto options = scan_options {pattern};
+
+  std::cout << fmt::format(
+      "Scan options: <{}>, fill_char<{}>, align<{}>, prec<{}>, "
+      "grouping_sep<{}>, type<{}>\n",
+      pattern,
+      options.fill_chr,
+      options.align,
+      options.prec,
+      options.grouping,
+      options.type);
+
   auto current = capturing_starting_point;
 
   // left padding
@@ -407,8 +502,12 @@ constexpr auto scan_from_pattern(std::string_view pattern,
   }
 
   // return detailed result
+  // return std::make_tuple(
+  //    actual_ret_beg, actual_ret_end, capturing_starting_point, current);
   return std::make_tuple(
-      actual_ret_beg, actual_ret_end, capturing_starting_point, current);
+      perform_scanning_pipeline(
+          std::string_view {actual_ret_beg, actual_ret_end}, options),
+      current);
 }
 
 expected_parse_result_t parse_input_from_pattern(std::string_view pattern,
@@ -478,25 +577,14 @@ expected_parse_result_t parse_input_from_pattern(std::string_view pattern,
                     get_pos(capture_input_until))}};
           } else {
             // we match formatting pattern against the regex
-            auto [matched_captured_input_beg,
-                  matched_captured_input_end,
-                  beg,
-                  end] = scan_from_pattern(current_pattern,
-                                           *capture_input_until,
-                                           current_in,
-                                           capturing_input_end);
+            auto [matched_result, resume_pos] =
+                scan_from_pattern(current_pattern,
+                                  *capture_input_until,
+                                  current_in,
+                                  capturing_input_end);
 
-            std::cout << fmt::format(
-                "Pattern: <{}>, Captured <{}>, Parsed <{}>",
-                current_pattern,
-                std::string_view {matched_captured_input_beg,
-                                  matched_captured_input_end},
-                std::string_view {beg, end})
-                      << std::endl;
-
-            parse_result.push_back(std::string_view {
-                matched_captured_input_beg, matched_captured_input_end});
-            current_in = end;
+            parse_result.push_back(matched_result);
+            current_in = resume_pos;
           }
         }
 
@@ -521,34 +609,6 @@ expected_parse_result_t parse_input_from_pattern(std::string_view pattern,
 
 template<typename T>
 inline constexpr bool always_false_v = false;
-
-template<class To>
-requires std::is_same_v < std::remove_cvref_t<To>,
-int > auto cast_to(std::string_view sv)
-{
-  return cast_to_int<int>(sv);
-}
-
-template<class To>
-requires std::is_same_v < std::remove_cvref_t<To>,
-float > auto cast_to(std::string_view sv)
-{
-  return cast_to_float(sv);
-}
-
-template<class To>
-requires std::is_same_v < std::remove_cvref_t<To>,
-double > auto cast_to(std::string_view sv)
-{
-  return cast_to_double(sv);
-}
-
-template<class To>
-requires std::is_same_v<std::remove_cvref_t<To>, std::string>
-auto cast_to(std::string_view sv)
-{
-  return std::string {begin(sv), end(sv)};
-}
 
 template<class T>
 struct select_expected
@@ -586,6 +646,111 @@ struct select_expected<std::string>
 template<class T>
 using select_expected_t = typename select_expected<T>::type;
 
+template<class To>
+requires std::is_integral_v<std::remove_cvref_t<To>>  //
+    expected_variant_t cast_to(auto val)
+{
+  using expected_t = std::remove_cvref_t<decltype(val)>;
+  if constexpr (std::is_same_v<std::string, typename expected_t::value_type>) {
+    auto sv = std::string_view {val->begin(), val->end()};
+    return cast_to_int<std::remove_cvref_t<To>>(sv);
+  } else {
+    return cast_to_int<std::remove_cvref_t<To>>(*val);
+  }
+}
+
+template<class To>
+requires std::is_floating_point_v<std::remove_cvref_t<To>>  //
+    && std::is_same_v<float, std::remove_cvref_t<To>>  //
+        expected_variant_t cast_to(auto val)
+{
+  using expected_t = std::remove_cvref_t<decltype(val)>;
+  if constexpr (std::is_same_v<std::string, typename expected_t::value_type>) {
+    auto sv = std::string_view {val->begin(), val->end()};
+    return cast_to_float(sv);
+  } else {
+    return cast_to_float(*val);
+  }
+}
+
+template<class To>
+requires std::is_floating_point_v<std::remove_cvref_t<To>>  //
+    && std::is_same_v<double, std::remove_cvref_t<To>>  //
+        expected_variant_t cast_to(auto val)
+{
+  using expected_t = std::remove_cvref_t<decltype(val)>;
+  if constexpr (std::is_same_v<std::string, typename expected_t::value_type>) {
+    auto sv = std::string_view {val->begin(), val->end()};
+    return cast_to_double(sv);
+  } else {
+    return cast_to_double(*val);
+  }
+}
+
+template<class To>
+requires std::is_floating_point_v<std::remove_cvref_t<To>>  //
+    && std::is_same_v<long double, std::remove_cvref_t<To>>  //
+        expected_variant_t cast_to(auto val)
+{
+  using expected_t = std::remove_cvref_t<decltype(val)>;
+  if constexpr (std::is_same_v<std::string, typename expected_t::value_type>) {
+    auto sv = std::string_view {val->begin(), val->end()};
+    return cast_to_long_double(sv);
+  } else {
+    return cast_to_long_double(*val);
+  }
+}
+
+template<class To>
+requires std::is_same_v<std::string, std::remove_cvref_t<To>>  //
+    expected_variant_t cast_to(auto val)
+{
+  using expected_t = std::remove_cvref_t<decltype(val)>;
+  if constexpr (std::is_floating_point_v<typename expected_t::value_type>  //
+                || std::is_integral_v<typename expected_t::value_type>)
+  {
+    auto digits =
+        std::string(std::numeric_limits<long double>::digits10 + 2, '\0');
+    auto [ptr, err] =
+        std::to_chars(digits.data(), digits.data() + digits.size(), *val);
+    if (err == std::errc()) {
+      return expected_string_t {digits};
+    } else {
+      if (err == std::errc::invalid_argument)  // not a number
+        return tl::unexpected {invalid_string::NotAString};
+      else if (err == std::errc::result_out_of_range)
+        return tl::unexpected {invalid_string::OutOfRange};
+      else if (err == std::errc::value_too_large)
+        return tl::unexpected {invalid_string::ValueTooLarge};
+      else
+        return tl::unexpected {invalid_string::UnknownError};
+    }
+  } else {
+    return expected_string_t {val};
+  }
+}
+
+template<class To>
+auto cast_var_to(auto var)
+{
+  return std::visit([](auto v) { return cast_to<To>(v); }, var);
+}
+
+template<class To>
+requires std::is_integral_v<std::remove_cvref_t<To>>  //
+    || std::is_floating_point_v<std::remove_cvref_t<To>>  //
+    || std::is_same_v<std::remove_cvref_t<To>, std::string>
+constexpr auto convert_to(auto var)
+{
+  if (!std::holds_alternative<select_expected_t<std::remove_cvref_t<To>>>(var))
+  {
+    auto ret = cast_var_to<std::remove_cvref_t<To>>(var);
+    return std::get<select_expected_t<std::remove_cvref_t<To>>>(ret);
+  } else {
+    return std::get<select_expected_t<std::remove_cvref_t<To>>>(var);
+  }
+}
+
 template<class... ExpectedTypes>
 using expected_output_t = std::tuple<select_expected_t<ExpectedTypes>...>;
 
@@ -593,10 +758,8 @@ template<class... ExpectedTypes, typename F, size_t... Is>
 auto generate_resulting_tuple_impl(F func, std::index_sequence<Is...>)
 {
   using tuple_t = std::tuple<ExpectedTypes...>;
-  // FIXME cast_to should receive a pair of arg, one is info about prec, 2nd
-  // is actual parsed value
   return std::make_tuple(
-      cast_to<decltype(std::get<Is>(std::declval<tuple_t>()))>(func(Is))...);
+      convert_to<decltype(std::get<Is>(std::declval<tuple_t>()))>(func(Is))...);
 }
 
 template<size_t N, class... ExpectedTypes, typename F>
@@ -618,8 +781,7 @@ expected_output_t<ExpectedTypes...> assemble_resulting_tuple(
   auto expected_output = generate_resulting_tuple<nb_matches, ExpectedTypes...>(
       [&parse_result](std::size_t idx)
       {
-        // FIXME fwd also first arg containing precision info
-        return parse_result[idx];  // keep only value of pattern
+        return parse_result[idx];  // get the resulting value from vector
       });
 
   return expected_output;
@@ -641,9 +803,9 @@ auto match_pattern(std::string_view pattern, std::string_view input)
     std::cout << fmt::format("Result size <{}>\n"sv, res.size());
 
     // Print result
-    for (auto&& m : res) {
-      std::cout << fmt::format("<{}>\n"sv, m);
-    }
+    // for (auto&& m : res) {
+    //  std::cout << fmt::format("<{}>\n"sv, m);
+    //}
 
     auto ret = assemble_resulting_tuple<ExpectedTypes...>(res);
 
@@ -660,11 +822,12 @@ auto match_pattern(std::string_view pattern, std::string_view input)
 
 int main()
 {
-  constexpr std::string_view input = "14 thus 10.5    gives      1001."sv;
-  constexpr std::string_view pattern = "{} thus {:10.5f} gives {>}."sv;
+  constexpr std::string_view input =
+      "14 thus  10.54321666    gives      1001."sv;
+  constexpr std::string_view pattern = "{} thus {^.5f} gives {>}."sv;
 
   [[maybe_unused]] auto ret =
-      match_pattern<int, float, std::string>(pattern, input);
+      match_pattern<std::string, float, std::string>(pattern, input);
 
   return 0;
 }
