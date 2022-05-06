@@ -73,7 +73,10 @@
     },
     {
       "name": "ci-coverage",
-      "inherits": ["coverage-unix", "dev-mode"],
+      "inherits": [
+        "coverage-unix",
+        "dev-mode"
+      ],
       "cacheVariables": {
         "COVERAGE_HTML_COMMAND": ""
       }
@@ -81,7 +84,10 @@
     {
       "name": "ci-sanitize",
       "binaryDir": "${sourceDir}/build/sanitize",
-      "inherits": ["ci-unix", "dev-mode"],
+      "inherits": [
+        "ci-unix",
+        "dev-mode"
+      ],
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Sanitize",
         "CMAKE_CXX_FLAGS_SANITIZE": "-O2 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-common"
@@ -94,15 +100,41 @@
     },
     {
       "name": "ci-macos",
-      "inherits": ["ci-build", "ci-unix", "dev-mode"]
+      "inherits": [
+        "ci-build",
+        "ci-unix",
+        "dev-mode"
+      ]
     },
     {
       "name": "ci-ubuntu",
-      "inherits": ["ci-build", "ci-unix", "clang-tidy", "cppcheck", "dev-mode"]
+      "inherits": [
+        "ci-build",
+        "ci-unix",
+        "clang-tidy",
+        "cppcheck",
+        "dev-mode"
+      ]
     },
     {
       "name": "ci-windows",
-      "inherits": ["ci-build", "ci-win64", "dev-mode"]
+      "inherits": [
+        "ci-build",
+        "ci-win64",
+        "dev-mode"
+      ]
+    },
+    {
+      "name": "GCC-12",
+      "displayName": "GCC 12.0.1 x86_64-linux-gnu",
+      "description": "Using compilers: C = /bin/x86_64-linux-gnu-gcc-12, CXX = /bin/x86_64-linux-gnu-g++-12",
+      "binaryDir": "${sourceDir}/out/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
+        "CMAKE_C_COMPILER": "/bin/x86_64-linux-gnu-gcc-12",
+        "CMAKE_CXX_COMPILER": "/bin/x86_64-linux-gnu-g++-12"
+      }
     }
   ]
 }

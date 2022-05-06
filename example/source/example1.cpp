@@ -16,6 +16,7 @@
 #include <string_view>
 #include <system_error>
 #include <tuple>
+#include <type_traits>
 #include <typeinfo>
 #include <utility>
 #include <variant>
@@ -31,14 +32,14 @@ constexpr Ret pow10(int n)
 
 using namespace std::literals;
 
-struct parse_error
+struct alignas(8) parse_error
 {
   enum class error_type
   {
-    nestedBrace,
-    unexpectedClosingBrace,
-    openingBraceJuxtaposedToClosingBrace,
-    missmatchPatternAndInput
+    nested_brace,
+    unexpected_closing_brace,
+    opening_brace_juxtaposed_to_closing_brace,
+    missmatch_pattern_and_input
   };
 
   const std::string& what() const
@@ -64,9 +65,9 @@ private:
 
 enum class invalid_int
 {
-  NotAnInt,
-  OutOfRange,
-  UnknownError
+  not_an_int,
+  out_of_range,
+  unknown_error
 };
 
 template<class Int>
@@ -74,37 +75,37 @@ using expected_int_t = tl::expected<Int, invalid_int>;
 
 enum class invalid_float
 {
-  NotAFloat,
-  OutOfRange,
-  UnknownError
+  not_a_float,
+  out_of_range,
+  unknown_error
 };
 
 using expected_float_t = tl::expected<float, invalid_float>;
 
 enum class invalid_double
 {
-  NotADouble,
-  OutOfRange,
-  UnknownError
+  not_a_double,
+  out_of_range,
+  unknown_error
 };
 
 using expected_double_t = tl::expected<double, invalid_double>;
 
 enum class invalid_long_double
 {
-  NotALongDouble,
-  OutOfRange,
-  UnknownError
+  not_a_long_double,
+  out_of_range,
+  unknown_error
 };
 
 using expected_long_double_t = tl::expected<long double, invalid_long_double>;
 
 enum class invalid_string
 {
-  NotAString,
-  OutOfRange,
-  ValueTooLarge,
-  UnknownError
+  not_a_string,
+  out_of_range,
+  value_too_large,
+  unknown_error
 };
 
 using expected_string_t = tl::expected<std::string, invalid_string>;
@@ -179,7 +180,7 @@ using expected_parse_result_t = tl::expected<parse_result_t, parse_error>;
   inf and nan, respectively. For upper-case presentation types,
   infinity and NaN are formatted as INF and NAN, respectively.
 */
-struct scan_options
+struct alignas(32) scan_options
 {
   std::string_view fill_chr;
   std::string_view align;
@@ -187,7 +188,7 @@ struct scan_options
   std::string_view prec;
   std::string_view type;
 
-  constexpr scan_options(std::string_view current_pattern);
+  constexpr explicit scan_options(std::string_view current_pattern);
 
 private:
   std::string_view whole_;
@@ -206,16 +207,27 @@ private:
 };
 
 constexpr scan_options::scan_options(std::string_view current_pattern)
+    : whole_(""sv)
+    , fill_chr(default_fill_chr_)
+    , align(default_align_)
+    , prec(default_prec_)
+    , grouping(default_grouping_)
+    , type(default_type_)
 {
   auto [whole, fill_chr_, align_, prec_, grouping_, type_] =
       pattern_matcher_(current_pattern);
-  std::tie(whole_, fill_chr, align, prec, grouping, type) =
-      std::tie(whole,
-               fill_chr_ != ""sv ? fill_chr_ : default_fill_chr_,
-               align_ != ""sv ? align_ : default_align_,
-               prec_ != ""sv ? prec_ : default_prec_,
-               grouping_ != ""sv ? grouping_ : default_grouping_,
-               type_ != ""sv ? type_ : default_type_);
+  if (whole)
+    whole = whole;
+  if (fill_chr_ != ""sv)
+    fill_chr = fill_chr_;
+  if (align_ != ""sv)
+    align = align_;
+  if (prec_ != ""sv)
+    prec = prec_;
+  if (grouping_ != ""sv)
+    grouping = grouping_;
+  if (type_ != ""sv)
+    type = type_;
 }
 
 template<class Int, class From>
@@ -229,11 +241,11 @@ constexpr expected_int_t<Int> cast_to_int(const From& input, int base = 10)
     return result;
   else {  // KO
     if (err == std::errc::invalid_argument)  // not a number
-      return tl::unexpected {invalid_int::NotAnInt};
+      return tl::unexpected {invalid_int::not_an_int};
     else if (err == std::errc::result_out_of_range)
-      return tl::unexpected {invalid_int::OutOfRange};
+      return tl::unexpected {invalid_int::out_of_range};
     else
-      return tl::unexpected {invalid_int::UnknownError};
+      return tl::unexpected {invalid_int::unknown_error};
   }
 }
 
@@ -264,11 +276,11 @@ constexpr expected_float_t cast_to_float(
     return std::round(result * mult) / mult;
   else {  // KO
     if (err == std::errc::invalid_argument)  // not a number
-      return tl::unexpected {invalid_float::NotAFloat};
+      return tl::unexpected {invalid_float::not_a_float};
     else if (err == std::errc::result_out_of_range)
-      return tl::unexpected {invalid_float::OutOfRange};
+      return tl::unexpected {invalid_float::out_of_range};
     else
-      return tl::unexpected {invalid_float::UnknownError};
+      return tl::unexpected {invalid_float::unknown_error};
   }
 }
 
@@ -303,11 +315,11 @@ constexpr expected_double_t cast_to_double(
     return std::round(result * mult) / mult;
   else {  // KO
     if (err == std::errc::invalid_argument)  // not a number
-      return tl::unexpected {invalid_double::NotADouble};
+      return tl::unexpected {invalid_double::not_a_double};
     else if (err == std::errc::result_out_of_range)
-      return tl::unexpected {invalid_double::OutOfRange};
+      return tl::unexpected {invalid_double::out_of_range};
     else
-      return tl::unexpected {invalid_double::UnknownError};
+      return tl::unexpected {invalid_double::unknown_error};
   }
 }
 
@@ -343,11 +355,11 @@ constexpr expected_long_double_t cast_to_long_double(
     return std::round(result * mult) / mult;
   else {  // KO
     if (err == std::errc::invalid_argument)  // not a number
-      return tl::unexpected {invalid_long_double::NotALongDouble};
+      return tl::unexpected {invalid_long_double::not_a_long_double};
     else if (err == std::errc::result_out_of_range)
-      return tl::unexpected {invalid_long_double::OutOfRange};
+      return tl::unexpected {invalid_long_double::out_of_range};
     else
-      return tl::unexpected {invalid_long_double::UnknownError};
+      return tl::unexpected {invalid_long_double::unknown_error};
   }
 }
 
@@ -387,7 +399,7 @@ constexpr expected_variant_t perform_scanning_pipeline(std::string_view input,
     // b,d,o,x,lb,ld,lo,lx,ub,ud,uo,ux,lub,lud,luo,lux,f,dlb,ldbl
     // compute precision
     auto prec = opts.prec != ""sv ? cast_to_int<unsigned>(opts.prec)
-                                  : tl::unexpected {invalid_int::NotAnInt};
+                                  : tl::unexpected {invalid_int::not_an_int};
     auto tmp_sv = std::string_view {begin(tmp), end(tmp)};
     // integers, ignore precision
     if (opts.type == "b") {
@@ -600,13 +612,13 @@ constexpr expected_variant_t cast_to(auto val)
       return expected_string_t {digits};
     } else {
       if (err == std::errc::invalid_argument)  // not a number
-        return tl::unexpected {invalid_string::NotAString};
+        return tl::unexpected {invalid_string::not_a_string};
       else if (err == std::errc::result_out_of_range)
-        return tl::unexpected {invalid_string::OutOfRange};
+        return tl::unexpected {invalid_string::out_of_range};
       else if (err == std::errc::value_too_large)
-        return tl::unexpected {invalid_string::ValueTooLarge};
+        return tl::unexpected {invalid_string::value_too_large};
       else
-        return tl::unexpected {invalid_string::UnknownError};
+        return tl::unexpected {invalid_string::unknown_error};
     }
   } else {
     return expected_string_t {val};
@@ -678,7 +690,7 @@ template<class... ExpectedTypes>
 constexpr expected_result_type_t<ExpectedTypes...> parse_input_from_pattern(
     std::string_view pattern, std::string_view input)
 {
-  expected_parse_result_t ret = [&]() -> expected_parse_result_t
+  auto ret = [&]() -> expected_parse_result_t
   {
     auto parse_result = parse_result_t {};
     {
@@ -702,7 +714,7 @@ constexpr expected_result_type_t<ExpectedTypes...> parse_input_from_pattern(
         if (*current_pat == '{') {  // start capturing
           if (capture) {
             return tl::unexpected {parse_error {
-                parse_error::error_type::nestedBrace,
+                parse_error::error_type::nested_brace,
                 fmt::format("Unexpected nested '{{' in pattern at pos <{}>\n"sv,
                             get_pos(current_pat))}};
 
@@ -717,7 +729,7 @@ constexpr expected_result_type_t<ExpectedTypes...> parse_input_from_pattern(
         {
           if (!capture) {
             return tl::unexpected {parse_error {
-                parse_error::error_type::unexpectedClosingBrace,
+                parse_error::error_type::unexpected_closing_brace,
                 fmt::format("Unexpected closing '}}' in pattern at pos {}\n"sv,
                             get_pos(current_pat))}};
           } else {
@@ -737,7 +749,8 @@ constexpr expected_result_type_t<ExpectedTypes...> parse_input_from_pattern(
             // error case, there are two juxtaposed {}{}
             if (*capture_input_until == '{') {
               return tl::unexpected {parse_error {
-                  parse_error::error_type::openingBraceJuxtaposedToClosingBrace,
+                  parse_error::error_type::
+                      opening_brace_juxtaposed_to_closing_brace,
                   fmt::format(
                       "Unexpected opening '{{' in pattern right next to a closing '}}' at pos {}\n "sv,
                       get_pos(capture_input_until))}};
@@ -757,7 +770,7 @@ constexpr expected_result_type_t<ExpectedTypes...> parse_input_from_pattern(
         } else if (!capture) {
           if (*current_pat != *current_in) {
             return tl::unexpected {parse_error {
-                parse_error::error_type::missmatchPatternAndInput,
+                parse_error::error_type::missmatch_pattern_and_input,
                 fmt::format("Missmatch input '{}' and pattern '{}'\n"sv,
                             *current_in,
                             *current_pat)}};
