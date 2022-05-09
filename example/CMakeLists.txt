@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.14)
 
-project(mscanTests LANGUAGES CXX)
+project(mscanExamples LANGUAGES CXX)
 
 include(../cmake/project-is-top-level.cmake)
 include(../cmake/windows-set-path.cmake)
@@ -12,34 +12,18 @@ endif()
 
 add_executable(mscan_example source/example1.cpp)
 
-include(FetchContent)
-
-FetchContent_Declare(
-    expected
-    GIT_REPOSITORY https://github.com/TartanLlama/expected
-    GIT_TAG "v1.0.0"
-)
-
-FetchContent_Declare(
-    ctre
-    GIT_REPOSITORY https://github.com/hanickadot/compile-time-regular-expressions
-    GIT_TAG "v3.6"
-)
-
 FetchContent_Declare(
     fmt
     GIT_REPOSITORY https://github.com/fmtlib/fmt
     GIT_TAG "8.1.1"
 )
 
-FetchContent_MakeAvailable(expected ctre fmt)
+FetchContent_MakeAvailable(fmt)
 
 target_link_libraries(
   mscan_example
   PRIVATE
   mscan::mscan
-  expected
-  ctre
   fmt
 )
 

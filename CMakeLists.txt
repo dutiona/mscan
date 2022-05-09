@@ -19,20 +19,13 @@ include(cmake/variables.cmake)
 
 add_library(
     mscan_mscan
-    source/mscan.cpp
+    INTERFACE
 )
 add_library(mscan::mscan ALIAS mscan_mscan)
 
-include(GenerateExportHeader)
-generate_export_header(
-    mscan_mscan
-    BASE_NAME mscan
-    EXPORT_FILE_NAME export/mscan/mscan_export.hpp
-    CUSTOM_CONTENT_FROM_VARIABLE pragma_suppress_c4251
-)
 
 if(NOT BUILD_SHARED_LIBS)
-  target_compile_definitions(mscan_mscan PUBLIC MSCAN_STATIC_DEFINE)
+  target_compile_definitions(mscan_mscan INTERFACE MSCAN_STATIC_DEFINE)
 endif()
 
 set_target_properties(
@@ -47,17 +40,47 @@ set_target_properties(
 
 target_include_directories(
     mscan_mscan ${mscan_warning_guard}
-    PUBLIC
+    INTERFACE
     "$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>"
 )
 
 target_include_directories(
     mscan_mscan SYSTEM
-    PUBLIC
+    INTERFACE
     "$<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/export>"
 )
 
-target_compile_features(mscan_mscan PUBLIC cxx_std_23)
+include(FetchContent)
+
+FetchContent_Declare(
+    expected
+    GIT_REPOSITORY https://github.com/TartanLlama/expected
+    GIT_TAG "v1.0.0"
+)
+
+FetchContent_Declare(
+    ctre
+    GIT_REPOSITORY https://github.com/hanickadot/compile-time-regular-expressions
+    GIT_TAG "v3.6"
+)
+
+FetchContent_Declare(
+    fmt
+    GIT_REPOSITORY https://github.com/fmtlib/fmt
+    GIT_TAG "8.1.1"
+)
+
+FetchContent_MakeAvailable(expected ctre fmt)
+
+target_link_libraries(
+  mscan_mscan
+  INTERFACE
+  expected
+  ctre
+  fmt
+)
+
+target_compile_features(mscan_mscan INTERFACE cxx_std_23)
 
 # ---- Install rules ----
 

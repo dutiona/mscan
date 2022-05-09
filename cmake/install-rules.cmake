@@ -55,13 +55,6 @@ install(
     COMPONENT mscan_Development
 )
 
-install(
-    EXPORT mscanTargets
-    NAMESPACE mscan::
-    DESTINATION "${mscan_INSTALL_CMAKEDIR}"
-    COMPONENT mscan_Development
-)
-
 if(PROJECT_IS_TOP_LEVEL)
   include(CPack)
 endif()
