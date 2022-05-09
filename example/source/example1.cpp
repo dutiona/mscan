@@ -196,7 +196,7 @@ private:
       "(?:([^\\{}])?(<|>|\\^))?"  // optional fill-and-align
       "(?:\\.([1-9][0-9]*))?"  // optional precision
       "(_|,)?"  // optional grouping separator
-      "(s|(?:l?u?(?:b|d|o|x))|(?:f|(?:l?dbl)))?"  // optional type
+      "(s|(?:l?u?(?:b|d|o|x))|(?:l?(?:f|(?:lf))))?"  // optional type
       >;
 
   static constexpr auto default_fill_chr_ = " "sv;
@@ -381,6 +381,8 @@ constexpr expected_long_double_t cast_to_long_double(
                                   / mult);
 }
 
+#define CONSTEXPR_FAIL(...) __builtin_unreachable()
+
 constexpr expected_variant_t perform_scanning_pipeline(std::string_view input,
                                                        const scan_options& opts)
 {
@@ -392,73 +394,118 @@ constexpr expected_variant_t perform_scanning_pipeline(std::string_view input,
     std::ranges::copy(begin(input), end(input), back_inserter(tmp));
 
   //  default, plain string, ignore precision
-  if (opts.type == "s"sv) {
+  if (opts.type == "s"sv)
     return tmp;
-  } else {  // unsigned, int, float, double, ...
-    // different cases:
-    // b,d,o,x,lb,ld,lo,lx,ub,ud,uo,ux,lub,lud,luo,lux,f,dlb,ldbl
-    // compute precision
-    auto prec = opts.prec != ""sv ? cast_to_int<unsigned>(opts.prec)
-                                  : tl::unexpected {invalid_int::not_an_int};
-    auto tmp_sv = std::string_view {begin(tmp), end(tmp)};
-    // integers, ignore precision
-    if (opts.type == "b") {
-      return cast_to_int<int>(tmp_sv, 2);
-    } else if (opts.type == "d"sv) {
-      return cast_to_int<int>(tmp_sv, 10);
-    } else if (opts.type == "o"sv) {
-      return cast_to_int<int>(tmp_sv, 8);
-    } else if (opts.type == "x"sv) {
-      return cast_to_int<int>(tmp_sv, 16);
-    } else if (opts.type == "lb"sv) {
-      return cast_to_int<long long>(tmp_sv, 2);
-    } else if (opts.type == "ld"sv) {
-      return cast_to_int<long long>(tmp_sv, 10);
-    } else if (opts.type == "lo"sv) {
-      return cast_to_int<long long>(tmp_sv, 8);
-    } else if (opts.type == "lx"sv) {
-      return cast_to_int<long long>(tmp_sv, 16);
-    } else if (opts.type == "ub"sv) {
-      return cast_to_int<unsigned>(tmp_sv, 2);
-    } else if (opts.type == "ud"sv) {
-      return cast_to_int<unsigned>(tmp_sv, 10);
-    } else if (opts.type == "uo"sv) {
-      return cast_to_int<unsigned>(tmp_sv, 8);
-    } else if (opts.type == "ux"sv) {
-      return cast_to_int<unsigned>(tmp_sv, 16);
-    } else if (opts.type == "lub"sv) {
-      return cast_to_int<long long unsigned>(tmp_sv, 2);
-    } else if (opts.type == "lud"sv) {
-      return cast_to_int<long long unsigned>(tmp_sv, 10);
-    } else if (opts.type == "luo"sv) {
-      return cast_to_int<long long unsigned>(tmp_sv, 8);
-    } else if (opts.type == "lux"sv) {
-      return cast_to_int<long long unsigned>(tmp_sv, 16);
-    } else {
-      if (prec) {
-        if (opts.type == "f"sv) {
-          return cast_to_float(tmp_sv, *prec);
-        } else if (opts.type == "dbl"sv) {
-          return cast_to_double(tmp_sv, *prec);
-        } else if (opts.type == "ldbl"sv) {
-          return cast_to_long_double(tmp_sv, *prec);
-        } else {
-          return tmp;
+
+  // unsigned, int, float, double, ...
+  // different cases:
+  // b,d,o,x,lb,ld,lo,lx,ub,ud,uo,ux,lub,lud,luo,lux,f,dlb,ldbl
+  // compute precision
+  auto prec = opts.prec != ""sv ? cast_to_int<unsigned>(opts.prec)
+                                : tl::unexpected {invalid_int::not_an_int};
+  auto tmp_sv = std::string_view {begin(tmp), end(tmp)};
+
+  // match type detail
+  auto type_matcher =
+      ctre::match<"(?:s|(?:(l)?(u)?(b|d|o|x))|(?:(l)?(f|(?:lf))))?">;
+  if (auto [whole, lng1, unsgn, intt, lng2, fltt] = type_matcher(opts.type);
+      whole)
+  {
+    auto [lng1_, unsgn_, intt_, lng2_, fltt_] = std::make_tuple(lng1.to_view(),
+                                                                unsgn.to_view(),
+                                                                intt.to_view(),
+                                                                lng2.to_view(),
+                                                                fltt.to_view());
+    // long type
+    if (not lng1_.empty() && lng1_[0] == 'l') {
+      // long unsigned
+      if (not unsgn_.empty() && unsgn_[0] == 'u') {
+        switch (intt_[0]) {
+          case 'b':
+            return cast_to_int<long long unsigned>(tmp_sv, 2);
+          case 'o':
+            return cast_to_int<long long unsigned>(tmp_sv, 8);
+          case 'd':
+            return cast_to_int<long long unsigned>(tmp_sv, 10);
+          case 'x':
+            return cast_to_int<long long unsigned>(tmp_sv, 16);
+          default:
+            CONSTEXPR_FAIL("Type must be b, o, d or x");
         }
+        // long signed
       } else {
-        if (opts.type == "f"sv) {
-          return cast_to_float(tmp_sv);
-        } else if (opts.type == "dbl"sv) {
-          return cast_to_double(tmp_sv);
-        } else if (opts.type == "ldbl"sv) {
-          return cast_to_long_double(tmp_sv);
-        } else {
-          return tmp;
+        switch (intt_[0]) {
+          case 'b':
+            return cast_to_int<long long>(tmp_sv, 2);
+          case 'o':
+            return cast_to_int<long long>(tmp_sv, 8);
+          case 'd':
+            return cast_to_int<long long>(tmp_sv, 10);
+          case 'x':
+            return cast_to_int<long long>(tmp_sv, 16);
+          default:
+            CONSTEXPR_FAIL("Type must be b, o, d or x");
         }
       }
+      // normal length type
+    } else if (not intt_.empty()) {
+      // unsigned
+      if (not unsgn_.empty() && unsgn_[0] == 'u') {
+        switch (intt_[0]) {
+          case 'b':
+            return cast_to_int<unsigned>(tmp_sv, 2);
+          case 'o':
+            return cast_to_int<unsigned>(tmp_sv, 8);
+          case 'd':
+            return cast_to_int<unsigned>(tmp_sv, 10);
+          case 'x':
+            return cast_to_int<unsigned>(tmp_sv, 16);
+          default:
+            CONSTEXPR_FAIL("Type must be b, o, d or x");
+        }
+        // signed
+      } else {
+        switch (intt_[0]) {
+          case 'b':
+            return cast_to_int<int>(tmp_sv, 2);
+          case 'o':
+            return cast_to_int<int>(tmp_sv, 8);
+          case 'd':
+            return cast_to_int<int>(tmp_sv, 10);
+          case 'x':
+            return cast_to_int<int>(tmp_sv, 16);
+          default:
+            CONSTEXPR_FAIL("Type must be b, o, d or x");
+        }
+      }
+      // Floating point numbers
+    } else if (not lng2_.empty() && lng2_[0] == 'l') {
+      // long float -> double
+      if (not fltt_.empty() && fltt_[0] == 'f') {
+        return prec ? cast_to_double(tmp_sv, *prec) : cast_to_double(tmp_sv);
+      }
+      // long long float -> long double
+      else if (fltt_.size() >= 2 && fltt_[0] == 'l' && fltt_[1] == 'f')
+      {
+        return prec ? cast_to_long_double(tmp_sv, *prec)
+                    : cast_to_long_double(tmp_sv);
+      } else {
+        CONSTEXPR_FAIL("Type must be f, lf, llf");
+      }
     }
+    // float
+    else if (not fltt_.empty() && fltt_[0] == 'f')
+    {
+      return prec ? cast_to_float(tmp_sv, *prec) : cast_to_float(tmp_sv);
+    } else {
+      CONSTEXPR_FAIL("Type must be f, lf, llf");
+    }
+  } else {
+    CONSTEXPR_FAIL("Type must be (l?u?(b|o|d|x)) | (f|lf|llf)");
   }
 }
+
+#undef CONSTEXPR_FAIL
 
 template<class B, class E>
 constexpr auto scan_from_pattern(std::string_view pattern,
